@@ -1,0 +1,36 @@
+name: TODO
+description: Track an internal project task. - 跟踪项目内部待办事项
+title: "[TODO] "
+labels:
+  - todo
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This template is intended for project maintainers to track internal work.
+        此模板供项目维护者跟踪内部工作使用。
+
+  - type: input
+    id: summary
+    attributes:
+      label: Task Summary - 任务摘要
+      description: State the concrete task to add to the project TODO list. - 请说明要加入项目 TODO 列表的具体任务。
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Scope and Completion Criteria - 范围与完成标准
+      description: Describe the scope, constraints, and how completion will be verified. - 请描述范围、约束以及如何验证任务完成。
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes - 备注
+      description: Add dependencies, references, or other useful context. - 请添加依赖、参考资料或其他补充信息。
+    validations:
+      required: false

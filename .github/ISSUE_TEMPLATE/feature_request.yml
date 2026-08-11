@@ -1,0 +1,63 @@
+name: Feature Request - 功能请求
+description: Suggest an improvement for FerricOxide. - 为 FerricOxide 提出改进建议
+title: "[Feature] "
+labels:
+  - enhancement
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing this request, please search for existing proposals and describe the user-facing need, not only an implementation detail.
+        提交前请先搜索已有建议，并描述用户侧需求，而不仅是实现细节。
+
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use Case - 使用场景
+      description: What problem or workflow would this feature address? - 此功能要解决什么问题或改善什么工作流？
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed Solution - 期望方案
+      description: Describe the behavior or API you would like FerricOxide to provide. - 请描述你期望 FerricOxide 提供的行为或 API。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target_platforms
+    attributes:
+      label: Target Platform - 目标平台
+      description: Select every platform this request should support. - 请选择此请求应支持的所有平台。
+      multiple: true
+      options:
+        - Platform independent - 与平台无关
+        - Windows x86
+        - Windows x86_64
+        - Windows aarch64
+        - Linux x86
+        - Linux x86_64
+        - Linux aarch64
+        - macOS x86_64
+        - macOS aarch64
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and Additional Context - 替代方案与补充信息
+      description: Describe alternatives, compatibility concerns, screenshots, or examples. - 请描述替代方案、兼容性顾虑、截图或示例。
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: duplicate_check
+    attributes:
+      label: Duplicate Check - 重复建议检查
+      options:
+        - label: I searched existing issues and did not find a duplicate request. - 我已搜索现有 issue，未发现重复建议。
+          required: true

@@ -1,0 +1,143 @@
+name: Bug Report - Bug 反馈
+description: Report a reproducible problem to help us improve FerricOxide. - 反馈可复现的问题，帮助我们改进 FerricOxide
+title: "[Bug] "
+labels:
+  - bug
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing this issue, please search for existing reports and confirm that you are using a supported setup.
+        提交前请先搜索已有 issue，并确认你使用的是受支持的环境。
+
+  - type: dropdown
+    id: operating_system
+    attributes:
+      label: Operating System - 操作系统
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other - 其他
+    validations:
+      required: true
+
+  - type: dropdown
+    id: cpu_architecture
+    attributes:
+      label: CPU Architecture - CPU 架构
+      options:
+        - x86
+        - x86_64
+        - aarch64
+        - Other - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: minecraft_version
+    attributes:
+      label: Minecraft Version - Minecraft 版本
+      placeholder: e.g. 26.1.2
+    validations:
+      required: true
+
+  - type: input
+    id: neoforge_version
+    attributes:
+      label: NeoForge Version - NeoForge 版本
+      placeholder: e.g. 26.1.2.87
+    validations:
+      required: true
+
+  - type: input
+    id: java_version
+    attributes:
+      label: Java Version - Java 版本
+      description: Include both the version and distribution. - 请提供版本号和发行版。
+      placeholder: e.g. OpenJDK 25 (Temurin)
+    validations:
+      required: true
+
+  - type: input
+    id: ferricoxide_version
+    attributes:
+      label: FerricOxide Version - FerricOxide 版本
+      placeholder: e.g. 0.0.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: webview_backend
+    attributes:
+      label: WebView Backend - WebView 后端
+      options:
+        - WebView2 (Windows)
+        - WKWebView (macOS)
+        - WebKitGTK (Linux)
+        - Unknown / Not applicable - 未知 / 不适用
+    validations:
+      required: true
+
+  - type: input
+    id: webview_version
+    attributes:
+      label: WebView Runtime Version - WebView 运行时版本
+      description: Provide the WebView2, macOS, or WebKitGTK version when known. - 如已知，请提供 WebView2、macOS 或 WebKitGTK 版本。
+      placeholder: e.g. WebView2 140.x / WebKitGTK 2.48.x
+    validations:
+      required: false
+
+  - type: textarea
+    id: current_behavior
+    attributes:
+      label: Current Behavior - 现有行为
+      description: Describe what happened, including any error messages. - 请描述实际发生的情况，包括错误信息。
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected Behavior - 预期行为
+      description: Describe what you expected to happen. - 请描述你期望发生的情况。
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction_steps
+    attributes:
+      label: Steps to Reproduce - 复现步骤
+      description: Provide the smallest reliable sequence that reproduces the issue. - 请提供能够稳定复现问题的最简步骤。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs - 日志
+      description: Drag and drop the relevant Minecraft log or crash report here. Remove sensitive information first. - 请拖放相关 Minecraft 日志或崩溃报告，并先移除敏感信息。
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or Additional Context - 截图或补充信息
+      description: Add screenshots, videos, mod lists, or other useful context. - 请添加截图、视频、模组列表或其他有用信息。
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: duplicate_check
+    attributes:
+      label: Duplicate Check - 重复问题检查
+      options:
+        - label: I searched existing issues and did not find a duplicate. - 我已搜索现有 issue，未发现重复问题。
+          required: true
