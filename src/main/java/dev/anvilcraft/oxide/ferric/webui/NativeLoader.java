@@ -95,6 +95,7 @@ public final class NativeLoader {
         }
 
         String normalizedArch = switch (arch) {
+            case "x86", "i386", "i486", "i586", "i686" -> "x86";
             case "x86_64", "amd64" -> "x86_64";
             case "aarch64", "arm64" -> "aarch64";
             default -> throw new IllegalStateException("unsupported CPU architecture for native webview: " + arch);
