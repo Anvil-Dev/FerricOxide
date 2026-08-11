@@ -1,0 +1,17 @@
+[package]
+name = "ferric_oxide_native"
+version = "0.1.0"
+edition = "2021"
+description = "Native WebView bridge for FerricOxide (JNI)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.22"
+wry = { version = "0.56", features = ["devtools"] }
+tao = "0.36"
+
+[profile.release]
+lto = true
+codegen-units = 1

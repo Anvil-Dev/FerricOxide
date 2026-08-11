@@ -1,0 +1,6 @@
+{
+  "itemGroup.ferric_oxide": "Example Mod Tab",
+  "block.ferric_oxide.example_block": "Example Block",
+  "item.ferric_oxide.example_item": "Example Item",
+  "key.ferric_oxide.open_webui": "Open FerricOxide Web UI"
+}
