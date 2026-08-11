@@ -1,0 +1,254 @@
+name: Reusable Build
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Native (${{ matrix.id }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: windows-x86
+            runner: windows-2022
+            platform: windows
+            arch: x86
+            target: i686-pc-windows-msvc
+            library: ferric_oxide_native.dll
+            msvc_arch: amd64_x86
+          - id: windows-x86_64
+            runner: windows-2022
+            platform: windows
+            arch: x86_64
+            target: x86_64-pc-windows-msvc
+            library: ferric_oxide_native.dll
+            msvc_arch: amd64
+          - id: windows-aarch64
+            runner: windows-11-arm
+            platform: windows
+            arch: aarch64
+            target: aarch64-pc-windows-msvc
+            library: ferric_oxide_native.dll
+          - id: linux-x86
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x86
+            target: i686-unknown-linux-gnu
+            library: libferric_oxide_native.so
+          - id: linux-x86_64
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x86_64
+            target: x86_64-unknown-linux-gnu
+            library: libferric_oxide_native.so
+          - id: linux-aarch64
+            runner: ubuntu-24.04-arm
+            platform: linux
+            arch: aarch64
+            target: aarch64-unknown-linux-gnu
+            library: libferric_oxide_native.so
+          - id: macos-x86_64
+            runner: macos-15-intel
+            platform: macos
+            arch: x86_64
+            target: x86_64-apple-darwin
+            library: libferric_oxide_native.dylib
+          - id: macos-aarch64
+            runner: macos-15
+            platform: macos
+            arch: aarch64
+            target: aarch64-apple-darwin
+            library: libferric_oxide_native.dylib
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Configure Visual Studio 2022 toolchain
+        if: runner.os == 'Windows' && matrix.msvc_arch != ''
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
+          vsversion: '2022'
+
+      - name: Install Linux native dependencies
+        if: matrix.id == 'linux-x86_64' || matrix.id == 'linux-aarch64'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential pkg-config libwebkit2gtk-4.1-dev libdbus-1-dev
+
+      - name: Install Linux x86 cross dependencies
+        if: matrix.id == 'linux-x86'
+        shell: bash
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install --yes \
+            build-essential \
+            gcc-multilib \
+            g++-multilib \
+            pkg-config \
+            libwebkit2gtk-4.1-dev:i386 \
+            libdbus-1-dev:i386
+
+      - name: Build Windows native library
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cargo build --manifest-path rust/Cargo.toml --locked --release --target "${{ matrix.target }}"
+
+      - name: Build Linux x86 native library
+        if: matrix.id == 'linux-x86'
+        shell: bash
+        env:
+          CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER: gcc
+          CC_i686_unknown_linux_gnu: gcc
+          CFLAGS_i686_unknown_linux_gnu: -m32
+          CXX_i686_unknown_linux_gnu: g++
+          CXXFLAGS_i686_unknown_linux_gnu: -m32
+          PKG_CONFIG_ALLOW_CROSS: '1'
+          PKG_CONFIG_LIBDIR: /usr/lib/i386-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          RUSTFLAGS: -C link-arg=-m32
+        run: cargo build --manifest-path rust/Cargo.toml --locked --release --target "${{ matrix.target }}"
+
+      - name: Build Unix native library
+        if: runner.os != 'Windows' && matrix.id != 'linux-x86'
+        shell: bash
+        run: cargo build --manifest-path rust/Cargo.toml --locked --release --target "${{ matrix.target }}"
+
+      - name: Collect Windows native artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $source = "rust/target/${{ matrix.target }}/release/${{ matrix.library }}"
+          $destination = "artifact/natives/${{ matrix.platform }}/${{ matrix.arch }}"
+          if (-not (Test-Path -Path $source -PathType Leaf)) {
+            throw "Native library not found: $source"
+          }
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+          Copy-Item -Path $source -Destination "$destination/${{ matrix.library }}"
+
+      - name: Collect Unix native artifact
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          source="rust/target/${{ matrix.target }}/release/${{ matrix.library }}"
+          destination="artifact/natives/${{ matrix.platform }}/${{ matrix.arch }}"
+          test -f "$source"
+          mkdir -p "$destination"
+          cp "$source" "$destination/${{ matrix.library }}"
+
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.id }}
+          path: artifact
+          if-no-files-found: error
+
+  package:
+    name: Package mod JAR
+    needs: native
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download all native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: prebuilt-artifacts
+          merge-multiple: true
+
+      - name: Verify native artifact set
+        shell: bash
+        run: |
+          expected=(
+            natives/windows/x86/ferric_oxide_native.dll
+            natives/windows/x86_64/ferric_oxide_native.dll
+            natives/windows/aarch64/ferric_oxide_native.dll
+            natives/linux/x86/libferric_oxide_native.so
+            natives/linux/x86_64/libferric_oxide_native.so
+            natives/linux/aarch64/libferric_oxide_native.so
+            natives/macos/x86_64/libferric_oxide_native.dylib
+            natives/macos/aarch64/libferric_oxide_native.dylib
+          )
+          for native in "${expected[@]}"; do
+            test -f "prebuilt-artifacts/$native" || {
+              echo "Missing native artifact: $native" >&2
+              exit 1
+            }
+          done
+          native_count=$(find prebuilt-artifacts/natives -type f | wc -l)
+          test "$native_count" -eq "${#expected[@]}" || {
+            echo "Expected ${#expected[@]} native artifacts, found $native_count" >&2
+            find prebuilt-artifacts/natives -type f -print >&2
+            exit 1
+          }
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Build mod with prebuilt natives
+        run: ./gradlew build --no-daemon -PprebuiltNativesDir="$PWD/prebuilt-artifacts/natives"
+
+      - name: Locate mod JAR
+        id: mod_jar
+        shell: bash
+        run: |
+          mapfile -t jars < <(find build/libs -maxdepth 1 -type f -name '*.jar' \
+            ! -name '*-sources.jar' ! -name '*-javadoc.jar' | sort)
+          test "${#jars[@]}" -eq 1 || {
+            echo "Expected exactly one mod JAR, found ${#jars[@]}" >&2
+            printf '%s\n' "${jars[@]}" >&2
+            exit 1
+          }
+          echo "path=${jars[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify native libraries in mod JAR
+        shell: bash
+        run: |
+          cat > expected-natives.txt <<'EOF'
+          natives/linux/aarch64/libferric_oxide_native.so
+          natives/linux/x86/libferric_oxide_native.so
+          natives/linux/x86_64/libferric_oxide_native.so
+          natives/macos/aarch64/libferric_oxide_native.dylib
+          natives/macos/x86_64/libferric_oxide_native.dylib
+          natives/windows/aarch64/ferric_oxide_native.dll
+          natives/windows/x86/ferric_oxide_native.dll
+          natives/windows/x86_64/ferric_oxide_native.dll
+          EOF
+          jar tf "${{ steps.mod_jar.outputs.path }}" \
+            | grep -E '^natives/.+\.(dll|so|dylib)$' \
+            | sort > actual-natives.txt
+          test "$(wc -l < actual-natives.txt)" -eq 8
+          diff -u expected-natives.txt actual-natives.txt
+
+      - name: Upload mod JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferric-oxide-mod
+          path: ${{ steps.mod_jar.outputs.path }}
+          if-no-files-found: error

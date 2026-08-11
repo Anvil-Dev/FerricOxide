@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  release:
+    name: Upload release asset
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download mod JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: ferric-oxide-mod
+          path: release-artifact
+
+      - name: Upload mod JAR to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifact/*.jar
+          fail_on_unmatched_files: true
