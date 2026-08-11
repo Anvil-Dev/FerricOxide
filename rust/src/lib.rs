@@ -319,18 +319,23 @@ fn create_entry(
         if !platform::is_valid_parent(spec.parent) {
             return Err("parent window is only supported on Windows".to_string());
         }
-        let webview = builder
-            .with_bounds(Rect {
-                position: tao::dpi::PhysicalPosition::new(0, 0).into(),
-                size: tao::dpi::PhysicalSize::new(spec.width, spec.height).into(),
-            })
-            .build_as_child(&platform::ParentHwnd(spec.parent))
-            .map_err(|e| format!("create embedded webview: {e}"))?;
-        entries.insert(id, Entry {
-            webview,
-            window: None,
-        });
-        return Ok(());
+        #[cfg(windows)]
+        {
+            let webview = builder
+                .with_bounds(Rect {
+                    position: tao::dpi::PhysicalPosition::new(0, 0).into(),
+                    size: tao::dpi::PhysicalSize::new(spec.width, spec.height).into(),
+                })
+                .build_as_child(&platform::ParentHwnd(spec.parent))
+                .map_err(|e| format!("create embedded webview: {e}"))?;
+            entries.insert(id, Entry {
+                webview,
+                window: None,
+            });
+            return Ok(());
+        }
+        #[cfg(not(windows))]
+        unreachable!("is_valid_parent rejects non-zero parents on this platform");
     }
 
     let window = WindowBuilder::new()
