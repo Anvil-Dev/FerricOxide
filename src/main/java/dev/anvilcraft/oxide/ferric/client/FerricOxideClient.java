@@ -5,50 +5,54 @@ import dev.anvilcraft.oxide.ferric.webui.NativeLoader;
 import dev.anvilcraft.oxide.ferric.webui.NativeWebView;
 import dev.anvilcraft.oxide.ferric.webui.WebUi;
 import dev.anvilcraft.oxide.ferric.webui.WebUiMessage;
-import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.commands.Commands;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
-import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import org.lwjgl.glfw.GLFW;
-import org.lwjgl.glfw.GLFWNativeWin32;
 
-/** Client-side entry point: loads the native library and wires the demo WebView hotkey. */
+/** Client-side entry point: loads the native library and registers the demo WebView command. */
 @Mod(value = FerricOxide.MODID, dist = Dist.CLIENT)
 public final class FerricOxideClient {
-    private static final KeyMapping OPEN_WEB_UI = new KeyMapping(
-        "key.ferric_oxide.open_webui",
-        GLFW.GLFW_KEY_F6,
-        KeyMapping.Category.MISC
-    );
-
     /** Set FERRICOXIDE_AUTO_OPEN=1 to open the demo UI right after game start (smoke testing). */
     private static final boolean AUTO_OPEN = System.getenv("FERRICOXIDE_AUTO_OPEN") != null;
     private static boolean autoOpened;
 
     public FerricOxideClient(IEventBus modEventBus) {
         NativeLoader.load();
-        modEventBus.addListener(RegisterKeyMappingsEvent.class, event -> event.register(OPEN_WEB_UI));
+        NeoForge.EVENT_BUS.addListener(
+            RegisterClientCommandsEvent.class,
+            FerricOxideClient::registerClientCommands
+        );
         NeoForge.EVENT_BUS.addListener(ClientTickEvent.Post.class, FerricOxideClient::onClientTick);
     }
 
+    private static void registerClientCommands(RegisterClientCommandsEvent event) {
+        event.getDispatcher().register(
+            Commands.literal("ferric")
+                .then(Commands.literal("ui")
+                    .then(Commands.literal("demo").executes(context -> {
+                        DemoWebUi.open();
+                        return 1;
+                    })))
+        );
+    }
+
     private static void onClientTick(ClientTickEvent.Post event) {
-        while (OPEN_WEB_UI.consumeClick()) {
-            DemoWebUi.toggle();
-        }
         if (AUTO_OPEN && !autoOpened && Minecraft.getInstance().getWindow() != null
             && Minecraft.getInstance().getWindow().getWidth() > 0) {
             autoOpened = true;
-            DemoWebUi.toggle();
+            DemoWebUi.open();
         }
         DemoWebUi.syncBounds();
         DemoWebUi.pushGameTime();
     }
 
-    /** Shared demo state: a single toggled WebView window showing the bundled demo page. */
+    /** Shared demo state: a single WebView window showing the bundled demo page. */
     static final class DemoWebUi {
         private static WebUi webUi;
         private static int lastWidth = -1;
@@ -59,14 +63,14 @@ public final class FerricOxideClient {
 
         private DemoWebUi() {}
 
-        static void toggle() {
+        static void open() {
             Minecraft mc = Minecraft.getInstance();
             if (!NativeWebView.isAvailable()) {
                 FerricOxide.LOGGER.warn("Native webview unavailable; cannot open demo UI");
                 return;
             }
             if (webUi != null) {
-                close();
+                webUi.focus();
                 return;
             }
             mouseWasGrabbed = mc.mouseHandler.isMouseGrabbed();
