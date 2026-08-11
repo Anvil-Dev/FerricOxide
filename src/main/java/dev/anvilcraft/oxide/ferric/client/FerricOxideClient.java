@@ -48,6 +48,7 @@ public final class FerricOxideClient {
             autoOpened = true;
             DemoWebUi.open();
         }
+        DemoWebUi.tickMouseGrab();
         DemoWebUi.syncBounds();
         DemoWebUi.pushGameTime();
     }
@@ -60,6 +61,13 @@ public final class FerricOxideClient {
         private static int gameTimeCounter;
         /** Whether the mouse cursor was grabbed by Minecraft before the UI opened. */
         private static boolean mouseWasGrabbed;
+        /**
+         * Ticks remaining during which we retry re-grabbing the mouse after closing the UI.
+         * The OS does not hand focus back to the Minecraft window synchronously when the
+         * webview child window is destroyed, and {@code grabMouse()} silently does nothing
+         * while the window is unfocused — so we retry for up to a second.
+         */
+        private static int grabRetryTicks;
 
         private DemoWebUi() {}
 
@@ -90,8 +98,10 @@ public final class FerricOxideClient {
         /**
          * Closes the demo UI and restores Minecraft's mouse capture.
          *
-         * <p>The embedded webview is destroyed asynchronously on the native thread, so focus is
-         * handed back to the Minecraft window and the grab is deferred to the next render tick.
+         * <p>The embedded webview is destroyed asynchronously on the native thread, and the OS
+         * only hands focus back to the Minecraft window afterwards. {@code grabMouse()} is a
+         * no-op while the window is unfocused, so the actual grab is retried from
+         * {@link #tickMouseGrab()} once focus has returned.
          */
         static void close() {
             if (webUi == null) {
@@ -105,9 +115,26 @@ public final class FerricOxideClient {
                 return;
             }
             Minecraft mc = Minecraft.getInstance();
-            // Ensure the OS focus is back on the Minecraft window before grabbing the cursor.
+            // Ask the OS to activate the Minecraft window, then retry the grab each tick.
             GLFW.glfwFocusWindow(mc.getWindow().handle());
-            mc.execute(() -> Minecraft.getInstance().mouseHandler.grabMouse());
+            grabRetryTicks = 20;
+        }
+
+        /** Retries the deferred mouse grab until the window regains focus (called every tick). */
+        static void tickMouseGrab() {
+            if (grabRetryTicks <= 0) {
+                return;
+            }
+            grabRetryTicks--;
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.mouseHandler.isMouseGrabbed() || mc.screen != null) {
+                grabRetryTicks = 0;
+                return;
+            }
+            if (mc.isWindowActive()) {
+                mc.mouseHandler.grabMouse();
+                grabRetryTicks = 0;
+            }
         }
 
         /** Handles a JS->Java ping: shows the payload in the game chat. Runs on the render thread. */
