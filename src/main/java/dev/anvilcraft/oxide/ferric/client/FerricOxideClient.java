@@ -1,6 +1,7 @@
 package dev.anvilcraft.oxide.ferric.client;
 
 import dev.anvilcraft.oxide.ferric.FerricOxide;
+import dev.anvilcraft.oxide.ferric.webui.EntityPreviewRenderer;
 import dev.anvilcraft.oxide.ferric.webui.NativeLoader;
 import dev.anvilcraft.oxide.ferric.webui.NativeWebView;
 import dev.anvilcraft.oxide.ferric.webui.WebUi;
@@ -83,15 +84,44 @@ public final class FerricOxideClient {
             }
             try {
                 webUi = WebUi.embedded(
-                    "FerricOxide Demo",
-                    FerricOxide.MODID,
-                    "webui/demo.html",
-                    mc.getWindow().getWidth(),
-                    mc.getWindow().getHeight()
-                ).on("ferric_oxide.ping", DemoWebUi::onPing).on("ferric_oxide.close", message -> close());
+                        "FerricOxide Demo",
+                        FerricOxide.MODID,
+                        "webui/demo.html",
+                        mc.getWindow().getWidth(),
+                        mc.getWindow().getHeight()
+                    ).on("ferric_oxide.ping", DemoWebUi::onPing)
+                    .on("ferric_oxide.entity_rotate", DemoWebUi::onEntityRotate)
+                    .on("ferric_oxide.close", message -> close());
+                WebUi.onRenderThread(() -> EntityPreviewRenderer.setPushConsumer(DemoWebUi::pushEntityFrame));
             } catch (Throwable t) {
                 FerricOxide.LOGGER.error("Failed to create demo webview", t);
             }
+        }
+
+        /**
+         * Handles JS->Java rotation updates for the entity preview (runs on the render thread).
+         */
+        private static void onEntityRotate(WebUiMessage message) {
+            WebUi.onRenderThread(() -> {
+                if (webUi != null && EntityPreviewRenderer.isActive()) {
+                    EntityPreviewRenderer.updateRotation(
+                        message.floatValue("yaw", 0.0F),
+                        message.floatValue("pitch", 0.0F)
+                    );
+                }
+            });
+        }
+
+        /**
+         * Pushes a freshly rendered entity frame to the page as a data URL.
+         */
+        private static void pushEntityFrame(byte[] png) {
+            WebUi webUi = DemoWebUi.webUi;
+            if (webUi == null) {
+                return;
+            }
+            String dataUrl = "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(png);
+            webUi.eval("window.ferricOxide.onEntityPreview('" + dataUrl + "');");
         }
 
         /**
@@ -113,6 +143,7 @@ public final class FerricOxideClient {
             if (webUi == null) {
                 return;
             }
+            WebUi.onRenderThread(EntityPreviewRenderer::stop);
             webUi.close();
             webUi = null;
             lastWidth = -1;

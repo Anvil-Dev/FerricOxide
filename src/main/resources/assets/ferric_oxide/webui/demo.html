@@ -1,100 +1,145 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>FerricOxide</title>
-<style>
-  html {
-    width: 100%;
-    height: 100%;
-    background: #1a1310;
-  }
-  body {
-    box-sizing: border-box;
-    margin: 0;
-    width: 100%;
-    min-height: 100%;
-    overflow: hidden;
-    font-family: "Segoe UI", system-ui, sans-serif;
-    color: #eceff1;
-    background: linear-gradient(135deg, #6d2000 0%, #31240e 55%, #1a1310 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    user-select: none;
-  }
-  .card {
-    background: rgba(20, 14, 10, 0.82);
-    border: 1px solid rgba(224, 122, 58, 0.45);
-    border-radius: 14px;
-    padding: 32px 40px;
-    text-align: center;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
-    max-width: 520px;
-  }
-  h1 {
-    margin: 0 0 4px;
-    font-size: 28px;
-    letter-spacing: 1px;
-    color: #f5b27a;
-  }
-  .sub {
-    margin: 0 0 20px;
-    font-size: 13px;
-    opacity: 0.7;
-  }
-  button {
-    background: #c05621;
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    padding: 12px 26px;
-    font-size: 15px;
-    cursor: pointer;
-    transition: background 0.15s ease, transform 0.1s ease;
-  }
-  button:hover { background: #dd6b20; transform: translateY(-1px); }
-  button:active { transform: translateY(1px); }
-  #count {
-    margin-top: 18px;
-    font-size: 40px;
-    font-weight: 700;
-    color: #ed8936;
-  }
-  #time {
-    margin-top: 10px;
-    font-size: 15px;
-    color: #f5b27a;
-  }
-  #log {
-    margin-top: 14px;
-    font-size: 12px;
-    opacity: 0.65;
-    min-height: 1.2em;
-  }
-  .res-row {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 18px;
-    margin-top: 20px;
-  }
-  .res-row img {
-    width: 48px;
-    height: 48px;
-    image-rendering: pixelated;
-    background: rgba(0, 0, 0, 0.35);
-    border-radius: 6px;
-    padding: 4px;
-  }
-  .res-row .cap {
-    font-size: 11px;
-    opacity: 0.7;
-  }
-</style>
+    <meta charset="UTF-8">
+    <title>FerricOxide</title>
+    <style>
+        html {
+            width: 100%;
+            height: 100%;
+            background: #1a1310;
+        }
+
+        body {
+            box-sizing: border-box;
+            margin: 0;
+            width: 100%;
+            min-height: 100%;
+            overflow: hidden;
+            font-family: "Segoe UI", system-ui, sans-serif;
+            color: #eceff1;
+            background: linear-gradient(135deg, #6d2000 0%, #31240e 55%, #1a1310 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+
+        .card {
+            background: rgba(20, 14, 10, 0.82);
+            border: 1px solid rgba(224, 122, 58, 0.45);
+            border-radius: 14px;
+            padding: 32px 40px;
+            text-align: center;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+            max-width: 520px;
+        }
+
+        h1 {
+            margin: 0 0 4px;
+            font-size: 28px;
+            letter-spacing: 1px;
+            color: #f5b27a;
+        }
+
+        .sub {
+            margin: 0 0 20px;
+            font-size: 13px;
+            opacity: 0.7;
+        }
+
+        button {
+            background: #c05621;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 26px;
+            font-size: 15px;
+            cursor: pointer;
+            transition: background 0.15s ease, transform 0.1s ease;
+        }
+
+        button:hover {
+            background: #dd6b20;
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(1px);
+        }
+
+        #count {
+            margin-top: 18px;
+            font-size: 40px;
+            font-weight: 700;
+            color: #ed8936;
+        }
+
+        #time {
+            margin-top: 10px;
+            font-size: 15px;
+            color: #f5b27a;
+        }
+
+        #log {
+            margin-top: 14px;
+            font-size: 12px;
+            opacity: 0.65;
+            min-height: 1.2em;
+        }
+
+        .res-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 18px;
+            margin-top: 20px;
+        }
+
+        .res-row img {
+            width: 48px;
+            height: 48px;
+            image-rendering: pixelated;
+            background: rgba(0, 0, 0, 0.35);
+            border-radius: 6px;
+            padding: 4px;
+        }
+
+        .res-row .cap {
+            font-size: 11px;
+            opacity: 0.7;
+        }
+
+        #entity-stage {
+            width: 128px;
+            height: 128px;
+            margin-top: 20px;
+            margin-left: auto;
+            margin-right: auto;
+            background: rgba(0, 0, 0, 0.45);
+            border: 1px solid rgba(224, 122, 58, 0.35);
+            border-radius: 10px;
+            overflow: hidden;
+            cursor: crosshair;
+            position: relative;
+        }
+
+        #entity-stage img {
+            width: 100%;
+            height: 100%;
+            image-rendering: pixelated;
+            display: block;
+        }
+
+        #entity-hint {
+            margin-top: 8px;
+            font-size: 11px;
+            opacity: 0.6;
+        }
+    </style>
 </head>
 <body>
-  <div class="card">
+<div class="card">
     <h1>FerricOxide</h1>
     <p class="sub">Native WebView rendered by Rust + WebView2</p>
     <button id="btn">Ping Minecraft</button>
@@ -102,69 +147,109 @@
     <div id="time">--</div>
     <div id="log"></div>
     <div class="res-row">
-      <figure>
-        <img id="apple" alt="apple">
-        <figcaption class="cap">minecraft:textures/item/apple.png (resource protocol)</figcaption>
-      </figure>
-      <figure>
-        <img src="icon.svg" alt="icon">
-        <figcaption class="cap">icon.svg → ferric_oxide:webui/icon.svg</figcaption>
-      </figure>
-      <figure>
-        <img id="diamond" alt="dragon_head">
-        <figcaption class="cap">item:minecraft:dragon_head (rendered icon)</figcaption>
-      </figure>
+        <figure>
+            <img alt="apple" id="apple">
+            <figcaption class="cap">minecraft:textures/item/apple.png (resource protocol)</figcaption>
+        </figure>
+        <figure>
+            <img alt="icon" src="icon.svg">
+            <figcaption class="cap">icon.svg → ferric_oxide:webui/icon.svg</figcaption>
+        </figure>
+        <figure>
+            <img alt="dragon_head" id="diamond">
+            <figcaption class="cap">item:minecraft:dragon_head (rendered icon)</figcaption>
+        </figure>
     </div>
-  </div>
+    <div id="entity-stage">
+        <img alt="entity preview" id="entity">
+    </div>
+    <div id="entity-hint">entity:minecraft:zombie — move the mouse to rotate</div>
+</div>
 <script>
-  let count = 0;
-  const btn = document.getElementById('btn');
-  btn.addEventListener('click', () => {
-    count++;
-    document.getElementById('count').textContent = count;
-    if (window.ipc && window.ipc.postMessage) {
-      window.ipc.postMessage(JSON.stringify({ type: 'ferric_oxide.ping', count }));
-      document.getElementById('log').textContent = 'sent ping #' + count;
-    } else {
-      document.getElementById('log').textContent = 'window.ipc not available';
-    }
-  });
+    let count = 0;
+    const btn = document.getElementById('btn');
+    btn.addEventListener('click', () => {
+        count++;
+        document.getElementById('count').textContent = count;
+        if (window.ipc && window.ipc.postMessage) {
+            window.ipc.postMessage(JSON.stringify({type: 'ferric_oxide.ping', count}));
+            document.getElementById('log').textContent = 'sent ping #' + count;
+        } else {
+            document.getElementById('log').textContent = 'window.ipc not available';
+        }
+    });
 
-  // Java -> JS direction: the mod pushes the world time once per second.
-  window.ferricOxide = {
-    onGameTime(message) {
-      const ticks = message && message.ticks;
-      if (typeof ticks === 'number') {
-        document.getElementById('time').textContent = 'Game time: ' + ticks + ' ticks';
-      }
-    }
-  };
+    // Java -> JS direction: the mod pushes the world time once per second.
+    window.ferricOxide = {
+        onGameTime(message) {
+            const ticks = message && message.ticks;
+            if (typeof ticks === 'number') {
+                document.getElementById('time').textContent = 'Game time: ' + ticks + ' ticks';
+            }
+        },
+        // Rendered entity preview frames (data URL PNGs).
+        onEntityPreview(dataUrl) {
+            document.getElementById('entity').src = dataUrl;
+        }
+    };
 
-  // Esc closes the UI through the IPC channel (the key event lands in the webview,
-  // not in Minecraft).
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && window.ipc && window.ipc.postMessage) {
-      window.ipc.postMessage(JSON.stringify({ type: 'ferric_oxide.close' }));
-    }
-  });
+    // Follow the pointer across the whole page, like the inventory entity preview.
+    (() => {
+        const stage = document.getElementById('entity-stage');
+        const hint = document.getElementById('entity-hint');
+        let rafPending = false;
+        document.addEventListener('mousemove', (event) => {
+            const rect = stage.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const xAngle = Math.atan((centerX - event.clientX) / 40.0);
+            const yAngle = Math.atan((centerY - event.clientY) / 40.0);
+            if (rafPending) return;
+            rafPending = true;
+            requestAnimationFrame(() => {
+                rafPending = false;
+                if (window.ipc && window.ipc.postMessage) {
+                    window.ipc.postMessage(JSON.stringify({
+                        type: 'ferric_oxide.entity_rotate',
+                        yaw: xAngle,
+                        pitch: yAngle
+                    }));
+                }
+            });
+        });
+        // Initial frame: request the first render through the resource protocol.
+        document.getElementById('entity').src =
+            window.ferricOxideResourceBase + 'entity/minecraft:zombie?size=128';
+        setTimeout(() => {
+            hint.textContent = 'move the mouse over the zombie to rotate';
+        }, 8000);
+    })();
 
-  // Demo: ping the game once after load to show the JS -> Java channel working.
-  window.addEventListener('load', () => {
-    // Absolute resource-pack reference; the injected window.ferricOxideResourceBase carries the
-    // platform-correct protocol prefix (http://ferric.localhost/ on Windows, ferric:// elsewhere).
-    document.getElementById('apple').src =
-      window.ferricOxideResourceBase + 'minecraft/textures/item/apple.png';
-    // Rendered item icon: the mod renders the ItemStack off-screen and serves the PNG.
-    document.getElementById('diamond').src =
-      window.ferricOxideResourceBase + 'item/minecraft:dragon_head?size=48';
-    setTimeout(() => {
-      count = 1;
-      document.getElementById('count').textContent = '1';
-      if (window.ipc && window.ipc.postMessage) {
-        window.ipc.postMessage(JSON.stringify({ type: 'ferric_oxide.ping', count }));
-      }
-    }, 2000);
-  });
+    // Esc closes the UI through the IPC channel (the key event lands in the webview,
+    // not in Minecraft).
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && window.ipc && window.ipc.postMessage) {
+            window.ipc.postMessage(JSON.stringify({type: 'ferric_oxide.close'}));
+        }
+    });
+
+    // Demo: ping the game once after load to show the JS -> Java channel working.
+    window.addEventListener('load', () => {
+        // Absolute resource-pack reference; the injected window.ferricOxideResourceBase carries the
+        // platform-correct protocol prefix (http://ferric.localhost/ on Windows, ferric:// elsewhere).
+        document.getElementById('apple').src =
+            window.ferricOxideResourceBase + 'minecraft/textures/item/apple.png';
+        // Rendered item icon: the mod renders the ItemStack off-screen and serves the PNG.
+        document.getElementById('diamond').src =
+            window.ferricOxideResourceBase + 'item/minecraft:dragon_head?size=48';
+        setTimeout(() => {
+            count = 1;
+            document.getElementById('count').textContent = '1';
+            if (window.ipc && window.ipc.postMessage) {
+                window.ipc.postMessage(JSON.stringify({type: 'ferric_oxide.ping', count}));
+            }
+        }, 2000);
+    });
 </script>
 </body>
 </html>

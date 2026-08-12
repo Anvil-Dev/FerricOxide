@@ -3,10 +3,9 @@ package dev.anvilcraft.oxide.ferric.webui;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Objects;
-
-import org.jspecify.annotations.Nullable;
 
 /**
  * Lightweight typed-message helpers for the {@code window.ipc.postMessage(...)} channel.
@@ -106,6 +105,18 @@ public final class WebUiMessage {
         return json.has(key) && json.get(key).isJsonPrimitive()
                ? json.get(key).getAsBoolean()
                : fallback;
+    }
+
+    public float floatValue(String key, float fallback) {
+        JsonElement element = json.get(key);
+        if (element == null || !element.isJsonPrimitive()) {
+            return fallback;
+        }
+        try {
+            return element.getAsFloat();
+        } catch (NumberFormatException | UnsupportedOperationException e) {
+            return fallback;
+        }
     }
 
     /**

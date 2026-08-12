@@ -10,13 +10,6 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.textures.TextureFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.logging.LogUtils;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.ArrayDeque;
-import java.util.Queue;
-import javax.imageio.ImageIO;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.render.GuiRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -35,6 +28,14 @@ import net.neoforged.neoforge.common.NeoForge;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
+import java.util.Queue;
+
 /**
  * Renders {@link ItemStack}s into PNG icons for the webview.
  *
@@ -45,13 +46,14 @@ import org.slf4j.Logger;
  * as PNG. Missing or unrenderable items resolve to {@code null} (HTTP 404 upstream).
  */
 final class ItemIconRenderer {
-    private static final Logger LOGGER = LogUtils.getLogger();
-    /** Packed light coordinates used by {@code GuiItemAtlas.drawToSlot}. */
-    private static final int PACKED_LIGHT = 15728880;
     static final int DEFAULT_SIZE = 32;
     static final int MIN_SIZE = 8;
     static final int MAX_SIZE = 256;
-
+    private static final Logger LOGGER = LogUtils.getLogger();
+    /**
+     * Packed light coordinates used by {@code GuiItemAtlas.drawToSlot}.
+     */
+    private static final int PACKED_LIGHT = 15728880;
     private final ItemModelResolver modelResolver;
     private final SubmitNodeCollector submitNodeCollector;
     private final FeatureRenderDispatcher featureRenderDispatcher;
@@ -59,10 +61,10 @@ final class ItemIconRenderer {
     private final Projection projection = new Projection();
     private final ProjectionMatrixBuffer projectionMatrixBuffer = new ProjectionMatrixBuffer("ferric_oxide_item");
     private final PoseStack poseStack = new PoseStack();
-    /** Render-thread only; drained in {@link #onRenderFrame}. */
+    /**
+     * Render-thread only; drained in {@link #onRenderFrame}.
+     */
     private final Queue<Task> pending = new ArrayDeque<>();
-
-    private record Task(Item item, int size, long requestId) {}
 
     ItemIconRenderer() {
         Minecraft mc = Minecraft.getInstance();
@@ -75,7 +77,9 @@ final class ItemIconRenderer {
         NeoForge.EVENT_BUS.addListener(RenderFrameEvent.Post.class, this::onRenderFrame);
     }
 
-    /** Queues an icon render; the result is handed back through {@link NativeWebView#respondResource}. */
+    /**
+     * Queues an icon render; the result is handed back through {@link NativeWebView#respondResource}.
+     */
     void enqueue(Item item, int size, long requestId) {
         pending.add(new Task(item, size, requestId));
     }
@@ -135,7 +139,9 @@ final class ItemIconRenderer {
         }
     }
 
-    /** Draws the item into the given texture, mirroring {@code GuiItemAtlas.drawToSlot}. */
+    /**
+     * Draws the item into the given texture, mirroring {@code GuiItemAtlas.drawToSlot}.
+     */
     private void drawItem(ItemStackRenderState state, GpuTextureView colorView, GpuTextureView depthView, int size) {
         poseStack.pushPose();
         poseStack.translate(size / 2.0F, size / 2.0F, 0.0F);
@@ -156,7 +162,9 @@ final class ItemIconRenderer {
         poseStack.popPose();
     }
 
-    /** Reads back the texture synchronously and encodes it as PNG. */
+    /**
+     * Reads back the texture synchronously and encodes it as PNG.
+     */
     private @Nullable byte[] readPixels(GpuTexture color, int size) {
         GpuDevice device = RenderSystem.getDevice();
         long byteSize = (long) size * size * 4L;
@@ -164,7 +172,10 @@ final class ItemIconRenderer {
         try {
             // glReadPixels writes the buffer synchronously; the fenced callback is only a
             // completion notification, so the mapped view below is already readable.
-            device.createCommandEncoder().copyTextureToBuffer(color, buffer, 0, () -> {}, 0, 0, 0, size, size);
+            device.createCommandEncoder().copyTextureToBuffer(
+                color, buffer, 0, () -> {
+                }, 0, 0, 0, size, size
+            );
             ByteBuffer data;
             try (GpuBuffer.MappedView view = device.createCommandEncoder().mapBuffer(buffer.slice(), true, false)) {
                 data = view.data();
@@ -191,5 +202,8 @@ final class ItemIconRenderer {
         } finally {
             buffer.close();
         }
+    }
+
+    private record Task(Item item, int size, long requestId) {
     }
 }

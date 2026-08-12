@@ -2,6 +2,7 @@ package dev.anvilcraft.oxide.ferric.webui;
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
+import org.jspecify.annotations.Nullable;
 import org.lwjgl.glfw.GLFWNativeCocoa;
 import org.lwjgl.glfw.GLFWNativeWin32;
 import org.slf4j.Logger;
@@ -13,8 +14,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
-
-import org.jspecify.annotations.Nullable;
 
 /**
  * High-level facade over a native OS WebView for mod developers.
@@ -88,7 +87,7 @@ public final class WebUi implements AutoCloseable {
         // mod's webui/ directory on both forms.
         String schemeBase = isWindows() ? "http://ferric.localhost/" : "ferric://";
         String injected = "<base href=\"" + schemeBase + modId + "/webui/\">"
-            + "<script>window.ferricOxideResourceBase = '" + schemeBase + "';</script>";
+                          + "<script>window.ferricOxideResourceBase = '" + schemeBase + "';</script>";
         html = injectBase(html, injected);
         return create(true, title, html, width, height, "ferric", new MinecraftResourceHandler());
     }
@@ -97,7 +96,9 @@ public final class WebUi implements AutoCloseable {
         return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }
 
-    /** Inserts {@code <base>} right after the opening {@code <head>} tag, or at the top when absent. */
+    /**
+     * Inserts {@code <base>} right after the opening {@code <head>} tag, or at the top when absent.
+     */
     private static String injectBase(String html, String base) {
         int headEnd = indexOfIgnoreCase(html, "<head");
         if (headEnd >= 0) {
@@ -215,7 +216,7 @@ public final class WebUi implements AutoCloseable {
     /**
      * Runs the task on the render thread; executes directly when already on it.
      */
-    static void onRenderThread(Runnable task) {
+    public static void onRenderThread(Runnable task) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.isSameThread()) {
             task.run();

@@ -1,8 +1,8 @@
 package dev.anvilcraft.oxide.ferric.webui;
 
-import java.util.concurrent.atomic.AtomicLong;
-
 import org.jspecify.annotations.Nullable;
+
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * A native OS WebView window (WebView2 on Windows, WebKitGTK on Linux, WKWebView on macOS).
