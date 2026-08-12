@@ -275,7 +275,8 @@ fn register_resource_protocol<'a>(
     })
 }
 
-/// Maps a custom-protocol URL back to a `namespace:path` resource location.
+/// Maps a custom-protocol URL back to a `namespace:path` resource location, preserving any
+/// query string (e.g. `?size=48`) so the Java side can read parameters.
 ///
 /// On Windows the WebView2 workaround reverts `http://{protocol}.localhost/...` to
 /// `{protocol}://localhost/<namespace>/<path>`, so the host is the placeholder `localhost`
@@ -283,17 +284,25 @@ fn register_resource_protocol<'a>(
 /// namespace in the host: `{protocol}://<namespace>/<path>`.
 fn parse_resource_location(uri: &str, protocol: &str) -> Option<String> {
     let rest = uri.strip_prefix(&format!("{protocol}://"))?;
-    let (host, path) = rest.split_once('/')?;
-    let path = path.split(['?', '#']).next().unwrap_or(path);
-    let (namespace, path) = if host == "localhost" {
-        path.split_once('/')?
+    let (host, path_and_query) = rest.split_once('/')?;
+    let (namespace, path_and_query) = if host == "localhost" {
+        path_and_query.split_once('/')?
     } else {
-        (host, path)
+        (host, path_and_query)
     };
+    let (path, query) = match path_and_query.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (path_and_query, None),
+    };
+    let path = path.split('#').next().unwrap_or(path);
+    let query = query.map(|query| query.split('#').next().unwrap_or(query));
     if namespace.is_empty() || path.is_empty() {
         return None;
     }
-    Some(format!("{namespace}:{path}"))
+    match query {
+        Some(query) if !query.is_empty() => Some(format!("{namespace}:{path}?{query}")),
+        _ => Some(format!("{namespace}:{path}")),
+    }
 }
 
 /// Parameters for creating a new WebView.

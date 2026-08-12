@@ -110,6 +110,10 @@
         <img src="icon.svg" alt="icon">
         <figcaption class="cap">icon.svg → ferric_oxide:webui/icon.svg</figcaption>
       </figure>
+      <figure>
+        <img id="diamond" alt="dragon_head">
+        <figcaption class="cap">item:minecraft:dragon_head (rendered icon)</figcaption>
+      </figure>
     </div>
   </div>
 <script>
@@ -150,6 +154,9 @@
     // platform-correct protocol prefix (http://ferric.localhost/ on Windows, ferric:// elsewhere).
     document.getElementById('apple').src =
       window.ferricOxideResourceBase + 'minecraft/textures/item/apple.png';
+    // Rendered item icon: the mod renders the ItemStack off-screen and serves the PNG.
+    document.getElementById('diamond').src =
+      window.ferricOxideResourceBase + 'item/minecraft:dragon_head?size=48';
     setTimeout(() => {
       count = 1;
       document.getElementById('count').textContent = '1';

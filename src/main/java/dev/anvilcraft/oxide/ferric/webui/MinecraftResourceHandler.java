@@ -6,13 +6,18 @@ import java.io.InputStream;
 import java.util.Locale;
 import java.util.Optional;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.Resource;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
- * Resolves {@code ferric://<namespace>/<path>} requests against Minecraft's resource manager.
+ * Resolves {@code ferric://<namespace>/<path>} requests against Minecraft's resource manager,
+ * and {@code ferric://item/<注册名>?size=N} requests by rendering the item's GUI icon.
  *
  * <p>{@link #resolve} is invoked on the native UI thread; the actual lookup is marshaled to the
  * render thread (where the resource manager is safe to touch) and the bytes are handed back
@@ -20,10 +25,17 @@ import org.slf4j.Logger;
  */
 final class MinecraftResourceHandler implements ResourceHandler {
     private static final Logger LOGGER = LogUtils.getLogger();
+    private static final String ITEM_PREFIX = "item:";
+    /** Render-thread-safe; created lazily on the first item request. */
+    private static @Nullable ItemIconRenderer itemIconRenderer;
 
     @Override
     public void resolve(String location, long requestId) {
         LOGGER.debug("Webview requests resource '{}' (request {})", location, requestId);
+        if (location.startsWith(ITEM_PREFIX)) {
+            resolveItem(location, requestId);
+            return;
+        }
         // The resource manager must be touched on the render thread.
         WebUi.onRenderThread(() -> {
             @Nullable byte[] bytes = null;
@@ -51,6 +63,64 @@ final class MinecraftResourceHandler implements ResourceHandler {
             }
             NativeWebView.respondResource(requestId, bytes, mime);
         });
+    }
+
+    /**
+     * Resolves {@code item:<注册名>?size=N} by rendering the item's GUI icon on the render
+     * thread. {@code size} defaults to {@link ItemIconRenderer#DEFAULT_SIZE}.
+     *
+     * <p>Item data components are only bound once the datapack has loaded, i.e. after joining
+     * a world; requests before that (e.g. on the title screen) answer 404.
+     */
+    private void resolveItem(String location, long requestId) {
+        WebUi.onRenderThread(() -> {
+            if (Minecraft.getInstance().level == null) {
+                LOGGER.warn(
+                    "Webview item request '{}' before joining a world; item data is not loaded yet",
+                    location
+                );
+                NativeWebView.respondResource(requestId, null, null);
+                return;
+            }
+            String body = location.substring(ITEM_PREFIX.length());
+            String[] parts = body.split("\\?", 2);
+            @Nullable Identifier id = Identifier.tryParse(parts[0]);
+            if (id == null) {
+                LOGGER.warn("Webview requested malformed item location '{}'", location);
+                NativeWebView.respondResource(requestId, null, null);
+                return;
+            }
+            int size = parseSize(parts.length == 2 ? parts[1] : "");
+            if (size < 0) {
+                LOGGER.warn("Webview requested invalid item size in '{}'", location);
+                NativeWebView.respondResource(requestId, null, null);
+                return;
+            }
+            Item item = BuiltInRegistries.ITEM.getValue(id);
+            if (item == null || item == Items.AIR) {
+                LOGGER.warn("Webview requested unknown item '{}'", parts[0]);
+                NativeWebView.respondResource(requestId, null, null);
+                return;
+            }
+            if (itemIconRenderer == null) {
+                itemIconRenderer = new ItemIconRenderer();
+            }
+            itemIconRenderer.enqueue(item, size, requestId);
+        });
+    }
+
+    private static int parseSize(String query) {
+        for (String pair : query.split("&")) {
+            if (pair.startsWith("size=")) {
+                try {
+                    int size = Integer.parseInt(pair.substring("size=".length()));
+                    return Math.clamp(size, ItemIconRenderer.MIN_SIZE, ItemIconRenderer.MAX_SIZE);
+                } catch (NumberFormatException e) {
+                    return -1;
+                }
+            }
+        }
+        return ItemIconRenderer.DEFAULT_SIZE;
     }
 
     private static String mimeTypeForPath(String path) {
