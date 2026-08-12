@@ -13,7 +13,6 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
 import net.neoforged.neoforge.common.NeoForge;
-import org.lwjgl.glfw.GLFW;
 
 /** Client-side entry point: loads the native library and registers the demo WebView command. */
 @Mod(value = FerricOxide.MODID, dist = Dist.CLIENT)
@@ -114,9 +113,8 @@ public final class FerricOxideClient {
             if (!mouseWasGrabbed) {
                 return;
             }
-            Minecraft mc = Minecraft.getInstance();
-            // Ask the OS to activate the Minecraft window, then retry the grab each tick.
-            GLFW.glfwFocusWindow(mc.getWindow().handle());
+            // Native teardown restores OS focus after destroying the WebView child. Retry the
+            // Minecraft cursor grab until that asynchronous focus transfer has completed.
             grabRetryTicks = 20;
         }
 

@@ -12,6 +12,9 @@ jni = "0.22"
 wry = { version = "0.56", features = ["devtools"] }
 tao = "0.36"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+dispatch2 = "0.3.1"
+
 [profile.release]
 lto = true
 codegen-units = 1

@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
+import org.lwjgl.glfw.GLFWNativeCocoa;
 import org.lwjgl.glfw.GLFWNativeWin32;
 import org.slf4j.Logger;
 
@@ -18,8 +19,9 @@ import org.slf4j.Logger;
  * <p>Wraps {@link NativeWebView} and adds:
  * <ul>
  *   <li>convenience factories — {@link #embedded(String, String, int, int)} embeds the webview
- *       into the Minecraft window (native HWND child) and hands it keyboard focus and the mouse
- *       cursor; {@link #window(String, String, int, int)} opens a standalone window;</li>
+ *       into the Minecraft window (an HWND child on Windows or an NSView child on macOS) and
+ *       hands it keyboard focus and the mouse cursor; {@link #window(String, String, int, int)}
+ *       opens a standalone window where supported;</li>
  *   <li>typed message routing — {@link #on(String, Consumer)} dispatches inbound
  *       {@code window.ipc.postMessage(...)} payloads by their {@code type} field;</li>
  *   <li>{@link #readModAsset(String, String)} to load HTML/JS/CSS from mod resources.</li>
@@ -86,8 +88,8 @@ public final class WebUi implements AutoCloseable {
             if (handler == null) {
                 LOGGER.debug("No handler registered for webview message type '{}'", type);
             } else {
-                // IPC callbacks arrive on the native webview thread. Minecraft APIs are only
-                // safe on the render thread, so marshal the dispatch before invoking handlers.
+                // IPC callbacks arrive on the platform's native UI thread. Minecraft APIs are
+                // only safe on the render thread, so marshal the dispatch before invoking handlers.
                 onRenderThread(() -> handler.accept(message));
             }
         });
@@ -97,7 +99,7 @@ public final class WebUi implements AutoCloseable {
                     LOGGER.error("Failed to create embedded webview: {}", error);
                     return;
                 }
-                // Creation callback runs on the native thread: marshal game access back to
+                // Creation callback runs on the native UI thread: marshal game access back to
                 // the render thread before touching the mouse handler.
                 onRenderThread(() -> {
                     if (holder[0] != null) {
@@ -176,14 +178,20 @@ public final class WebUi implements AutoCloseable {
         }
     }
 
-    /** Native handle of the Minecraft window (HWND on Windows) or 0 when not supported. */
+    /**
+     * Native parent handle for the Minecraft window: HWND on Windows, NSView pointer on macOS,
+     * or {@code 0} on Linux.
+     */
     public static long minecraftWindowHandle() {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        if (!os.contains("win")) {
-            return 0L;
-        }
         long glfwWindow = Minecraft.getInstance().getWindow().handle();
-        return GLFWNativeWin32.glfwGetWin32Window(glfwWindow);
+        if (os.contains("win")) {
+            return GLFWNativeWin32.glfwGetWin32Window(glfwWindow);
+        }
+        if (os.contains("mac")) {
+            return GLFWNativeCocoa.glfwGetCocoaView(glfwWindow);
+        }
+        return 0L;
     }
 
     /** Runs the task on the render thread; executes directly when already on it. */

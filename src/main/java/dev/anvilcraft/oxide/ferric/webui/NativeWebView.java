@@ -3,12 +3,14 @@ package dev.anvilcraft.oxide.ferric.webui;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * A native OS WebView window (WebView2 on Windows, WebKitGTK on Linux, WKWebView on macOS),
- * driven by a separate Rust event-loop thread over JNI.
+ * A native OS WebView window (WebView2 on Windows, WebKitGTK on Linux, WKWebView on macOS).
+ * Windows and Linux use a dedicated Rust event-loop thread; macOS dispatches every operation to
+ * the OS main queue because AppKit and WKWebView require the process main thread.
  *
  * <p>Instances are created via the {@link Builder}. All methods are safe to call from any
- * thread; the heavy work is marshaled to the native thread. A garbage-collected instance that
- * was never closed is closed automatically by {@link Cleaner} semantics in {@link CloseGuard}.
+ * thread; work is marshaled to the platform's native UI thread. A garbage-collected instance
+ * that was never closed is closed automatically by {@link Cleaner} semantics in
+ * {@link CloseGuard}.
  */
 public final class NativeWebView implements AutoCloseable {
     private final CloseGuard guard;
@@ -186,8 +188,9 @@ public final class NativeWebView implements AutoCloseable {
         }
 
         /**
-         * Embeds the WebView as a child of the given native window handle (HWND on Windows).
-         * Pass {@code 0} (the default) for a standalone window.
+         * Embeds the WebView as a child of the given native parent: an HWND on Windows or an
+         * NSView pointer on macOS. Pass {@code 0} (the default) for a standalone window;
+         * standalone WebViews are not supported on macOS.
          */
         public Builder parent(long windowHandle) {
             this.parent = windowHandle;
@@ -195,7 +198,7 @@ public final class NativeWebView implements AutoCloseable {
         }
 
         /**
-         * Registers a Java callback invoked (on the native webview thread) for every
+         * Registers a Java callback invoked on the platform's native UI thread for every
          * {@code window.ipc.postMessage(...)} from the page.
          */
         public Builder ipc(MessageHandler handler) {
@@ -214,10 +217,11 @@ public final class NativeWebView implements AutoCloseable {
 
         /**
          * Creates the native WebView. Returns immediately; the actual creation happens on the
-         * native thread and its outcome is reported through {@link #onCreated(CreationCallback)}.
+         * dedicated event-loop thread (Windows/Linux) or the OS main queue (macOS), and its
+         * outcome is reported through {@link #onCreated(CreationCallback)}.
          *
-         * @throws IllegalStateException if the native library is not loaded, or the webview
-         *                               event loop is not running
+         * @throws IllegalStateException if the native library is not loaded, or the native
+         *                               command dispatcher is not running
          */
         public NativeWebView build() {
             if (!NativeLoader.isLoaded()) {
