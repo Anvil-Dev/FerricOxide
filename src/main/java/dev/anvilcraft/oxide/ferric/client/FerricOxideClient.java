@@ -6,6 +6,7 @@ import dev.anvilcraft.oxide.ferric.webui.NativeWebView;
 import dev.anvilcraft.oxide.ferric.webui.WebUi;
 import dev.anvilcraft.oxide.ferric.webui.WebUiMessage;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.commands.Commands;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
@@ -58,8 +59,6 @@ public final class FerricOxideClient {
         private static int lastWidth = -1;
         private static int lastHeight = -1;
         private static int gameTimeCounter;
-        /** Whether the mouse cursor was grabbed by Minecraft before the UI opened. */
-        private static boolean mouseWasGrabbed;
         /**
          * Ticks remaining during which we retry re-grabbing the mouse after closing the UI.
          * The OS does not hand focus back to the Minecraft window synchronously when the
@@ -80,7 +79,6 @@ public final class FerricOxideClient {
                 webUi.focus();
                 return;
             }
-            mouseWasGrabbed = mc.mouseHandler.isMouseGrabbed();
             try {
                 webUi = WebUi.embedded(
                     "FerricOxide Demo",
@@ -101,6 +99,13 @@ public final class FerricOxideClient {
          * only hands focus back to the Minecraft window afterwards. {@code grabMouse()} is a
          * no-op while the window is unfocused, so the actual grab is retried from
          * {@link #tickMouseGrab()} once focus has returned.
+         *
+         * <p>Whether the grab is attempted at all is decided from the screen state at close
+         * time, not from the moment the UI was opened: the {@code /ferric ui demo} command
+         * executes while the chat screen is still open, so a grab flag captured in
+         * {@link #open()} would be stale. Only in-game (no screen) or the focus-loss
+         * {@link PauseScreen} should the cursor return to grab; any other screen (e.g. the
+         * title screen with {@code FERRICOXIDE_AUTO_OPEN}) keeps it free.
          */
         static void close() {
             if (webUi == null) {
@@ -110,7 +115,8 @@ public final class FerricOxideClient {
             webUi = null;
             lastWidth = -1;
             lastHeight = -1;
-            if (!mouseWasGrabbed) {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.screen != null && !(mc.screen instanceof PauseScreen)) {
                 return;
             }
             // Native teardown restores OS focus after destroying the WebView child. Retry the
@@ -125,9 +131,21 @@ public final class FerricOxideClient {
             }
             grabRetryTicks--;
             Minecraft mc = Minecraft.getInstance();
-            if (mc.mouseHandler.isMouseGrabbed() || mc.screen != null) {
+            if (mc.mouseHandler.isMouseGrabbed()) {
                 grabRetryTicks = 0;
                 return;
+            }
+            if (mc.screen != null) {
+                // While the embedded webview holds OS focus, vanilla pause-on-lost-focus opens
+                // a PauseScreen behind it. That screen is a side effect of the UI itself, not
+                // user intent — dismiss it so the game returns to the pre-UI state. Any other
+                // screen is left alone and stops the retry.
+                if (mc.screen instanceof PauseScreen) {
+                    mc.setScreen(null);
+                } else {
+                    grabRetryTicks = 0;
+                    return;
+                }
             }
             if (mc.isWindowActive()) {
                 mc.mouseHandler.grabMouse();
