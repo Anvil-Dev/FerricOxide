@@ -57,17 +57,78 @@ public final class WebUi implements AutoCloseable {
      * @param height initial height in parent client-area pixels
      */
     public static WebUi embedded(String title, String html, int width, int height) {
-        return create(true, title, html, width, height);
+        return create(true, title, html, width, height, null, null);
+    }
+
+    /**
+     * Creates an embedded webview that loads a mod asset page and can reference resource-pack
+     * files.
+     *
+     * <p>The page is read from {@code assets/<modId>/<path>} and a {@code <base>} element is
+     * injected so that relative references resolve against the mod's {@code webui/} directory
+     * (for example {@code img.png} in {@code webui/test/exp1.html} resolves to
+     * {@code webui/img.png}). Resource-pack files are addressable through the {@code ferric}
+     * protocol: {@code ferric://<namespace>/<path>} maps to the {@code namespace:path} resource
+     * location, e.g. {@code ferric://minecraft/textures/item/apple.png}.
+     *
+     * @param title  window title (used for the standalone fallback)
+     * @param modId  mod id owning the page (also the default {@code ferric://} namespace)
+     * @param path   page path inside the mod's assets, must start with {@code webui/}
+     * @param width  initial width in parent client-area pixels
+     * @param height initial height in parent client-area pixels
+     */
+    public static WebUi embedded(String title, String modId, String path, int width, int height) {
+        if (!path.startsWith("webui/")) {
+            throw new IllegalArgumentException("embedded pages must live under webui/, got: " + path);
+        }
+        String html = readModAsset(modId, path);
+        // WebView2 (Windows) only intercepts http(s) URLs, so custom-scheme requests there use
+        // the `http://{protocol}.localhost/...` workaround; other platforms use the native
+        // `{protocol}://` scheme. The base element resolves relative references against the
+        // mod's webui/ directory on both forms.
+        String schemeBase = isWindows() ? "http://ferric.localhost/" : "ferric://";
+        String injected = "<base href=\"" + schemeBase + modId + "/webui/\">"
+            + "<script>window.ferricOxideResourceBase = '" + schemeBase + "';</script>";
+        html = injectBase(html, injected);
+        return create(true, title, html, width, height, "ferric", new MinecraftResourceHandler());
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+    }
+
+    /** Inserts {@code <base>} right after the opening {@code <head>} tag, or at the top when absent. */
+    private static String injectBase(String html, String base) {
+        int headEnd = indexOfIgnoreCase(html, "<head");
+        if (headEnd >= 0) {
+            int gt = html.indexOf('>', headEnd);
+            if (gt >= 0) {
+                return html.substring(0, gt + 1) + base + html.substring(gt + 1);
+            }
+        }
+        return base + html;
+    }
+
+    private static int indexOfIgnoreCase(String haystack, String needle) {
+        return haystack.toLowerCase(java.util.Locale.ROOT).indexOf(needle);
     }
 
     /**
      * Creates a standalone WebView window (not attached to the Minecraft window).
      */
     public static WebUi window(String title, String html, int width, int height) {
-        return create(false, title, html, width, height);
+        return create(false, title, html, width, height, null, null);
     }
 
-    private static WebUi create(boolean embedded, String title, String html, int width, int height) {
+    private static WebUi create(
+        boolean embedded,
+        String title,
+        String html,
+        int width,
+        int height,
+        @Nullable String protocol,
+        @Nullable ResourceHandler resource
+    ) {
         if (!NativeWebView.isAvailable()) {
             throw new IllegalStateException("ferric_oxide native library is not loaded");
         }
@@ -78,6 +139,9 @@ public final class WebUi implements AutoCloseable {
             .html(html);
         if (embedded) {
             builder.parent(minecraftWindowHandle());
+        }
+        if (protocol != null && resource != null) {
+            builder.resource(protocol, resource);
         }
         NativeWebView[] holder = new NativeWebView[1];
         builder.ipc(raw -> {

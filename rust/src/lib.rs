@@ -12,10 +12,10 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(target_os = "macos"))]
 use std::sync::mpsc;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use jni::errors::ThrowRuntimeExAndDefault;
-use jni::objects::{Global, JClass, JObject, JString};
+use jni::objects::{Global, JByteArray, JClass, JObject, JString};
 use jni::signature::RuntimeMethodSignature;
 use jni::strings::JNIString;
 use jni::sys::{jboolean, jint, jlong};
@@ -30,8 +30,9 @@ use tao::event_loop::{
 };
 #[cfg(not(target_os = "macos"))]
 use tao::window::{Window, WindowBuilder};
+use wry::http::Response;
 use wry::Rect;
-use wry::{WebView, WebViewBuilder};
+use wry::{RequestAsyncResponder, WebView, WebViewBuilder};
 
 #[cfg(windows)]
 mod platform {
@@ -204,6 +205,97 @@ fn on_result_sig() -> &'static RuntimeMethodSignature {
     SIG.get_or_init(|| "(JLjava/lang/String;)V".parse().expect("valid method signature"))
 }
 
+/// Java-side resource resolver (`ResourceHandler.resolve(String, long)`) invoked from the
+/// custom protocol handler when the page requests a {@code ferric://<namespace>/<path>} URL.
+struct ResourceCallback {
+    vm: Arc<JavaVM>,
+    handler: Global<JObject<'static>>,
+}
+
+impl ResourceCallback {
+    fn resolve(&self, location: &str, request_id: u64) {
+        let _ = self
+            .vm
+            .attach_current_thread(|env| -> jni::errors::Result<()> {
+                let location = env.new_string(location)?;
+                let result = env.call_method(
+                    self.handler.as_ref(),
+                    jni_str!("resolve"),
+                    resource_resolve_sig().method_signature(),
+                    &[(&location).into(), JValue::Long(request_id as jlong)],
+                );
+                if result.is_err() || env.exception_check() {
+                    env.exception_describe();
+                    let _ = env.exception_clear();
+                }
+                Ok(())
+            });
+    }
+}
+
+/// Lazily parsed `(Ljava/lang/String;J)V` signature for the resource-resolver callback.
+fn resource_resolve_sig() -> &'static RuntimeMethodSignature {
+    static SIG: OnceLock<RuntimeMethodSignature> = OnceLock::new();
+    SIG.get_or_init(|| "(Ljava/lang/String;J)V".parse().expect("valid method signature"))
+}
+
+/// Responders for in-flight resource requests, keyed by request id; the Java side resolves
+/// the resource on the render thread and hands the bytes back via `nativeResourceResponse`.
+static PENDING_RESOURCES: OnceLock<Mutex<HashMap<u64, RequestAsyncResponder>>> = OnceLock::new();
+static NEXT_RESOURCE_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Registers the custom protocol that maps `{protocol}://<namespace>/<path>` URLs to
+/// `namespace:path` resource locations. Every matching request is forwarded to the Java
+/// resource resolver; the response is completed asynchronously once the render thread
+/// returns the resource bytes.
+fn register_resource_protocol<'a>(
+    builder: WebViewBuilder<'a>,
+    protocol: String,
+    resource: ResourceCallback,
+) -> WebViewBuilder<'a> {
+    builder.with_asynchronous_custom_protocol(protocol.clone(), move |_id, request, responder| {
+        let uri = request.uri().to_string();
+        let location = parse_resource_location(&uri, &protocol);
+        let Some(location) = location else {
+            responder.respond(
+                Response::builder()
+                    .status(404)
+                    .body(Vec::<u8>::new())
+                    .expect("valid 404 response"),
+            );
+            return;
+        };
+        let request_id = NEXT_RESOURCE_ID.fetch_add(1, Ordering::Relaxed);
+        PENDING_RESOURCES
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap()
+            .insert(request_id, responder);
+        resource.resolve(&location, request_id);
+    })
+}
+
+/// Maps a custom-protocol URL back to a `namespace:path` resource location.
+///
+/// On Windows the WebView2 workaround reverts `http://{protocol}.localhost/...` to
+/// `{protocol}://localhost/<namespace>/<path>`, so the host is the placeholder `localhost`
+/// and the namespace is the first path segment. On Linux/macOS the native scheme carries the
+/// namespace in the host: `{protocol}://<namespace>/<path>`.
+fn parse_resource_location(uri: &str, protocol: &str) -> Option<String> {
+    let rest = uri.strip_prefix(&format!("{protocol}://"))?;
+    let (host, path) = rest.split_once('/')?;
+    let path = path.split(['?', '#']).next().unwrap_or(path);
+    let (namespace, path) = if host == "localhost" {
+        path.split_once('/')?
+    } else {
+        (host, path)
+    };
+    if namespace.is_empty() || path.is_empty() {
+        return None;
+    }
+    Some(format!("{namespace}:{path}"))
+}
+
 /// Parameters for creating a new WebView.
 struct WebViewSpec {
     #[cfg_attr(target_os = "macos", allow(dead_code))]
@@ -218,6 +310,11 @@ struct WebViewSpec {
     parent: isize,
     callback: Option<IpcCallback>,
     creation: Option<CreationCallback>,
+    /// Custom protocol name (e.g. "ferric") mapping `{protocol}://<namespace>/<path>` to
+    /// game resources; `None` disables the protocol.
+    protocol: Option<String>,
+    /// Java-side resolver used by the custom protocol handler.
+    resource: Option<ResourceCallback>,
 }
 
 /// Commands sent from arbitrary JNI threads to the platform's native UI thread.
@@ -514,6 +611,9 @@ fn create_entry_macos(
             callback.dispatch(request.body());
         });
     }
+    if let (Some(protocol), Some(resource)) = (spec.protocol, spec.resource) {
+        builder = register_resource_protocol(builder, protocol, resource);
+    }
 
     let webview = builder
         .with_bounds(Rect {
@@ -544,6 +644,9 @@ fn create_entry(
         builder = builder.with_ipc_handler(move |request| {
             callback.dispatch(request.body());
         });
+    }
+    if let (Some(protocol), Some(resource)) = (spec.protocol, spec.resource) {
+        builder = register_resource_protocol(builder, protocol, resource);
     }
 
     if spec.parent != 0 {
@@ -622,6 +725,8 @@ pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_NativeWebView_nati
     parent: jlong,
     handler: JObject<'caller>,
     creation: JObject<'caller>,
+    protocol: JString<'caller>,
+    resource: JObject<'caller>,
 ) -> jlong {
     unowned_env
         .with_env(
@@ -648,6 +753,15 @@ pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_NativeWebView_nati
                     })
                 };
 
+                let resource = if resource.is_null() {
+                    None
+                } else {
+                    Some(ResourceCallback {
+                        vm: Arc::new(env.get_java_vm()?),
+                        handler: env.new_global_ref(resource)?,
+                    })
+                };
+
                 let mut spec = WebViewSpec {
                     title,
                     width: width.max(1) as u32,
@@ -659,6 +773,8 @@ pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_NativeWebView_nati
                     parent: parent as isize,
                     callback,
                     creation,
+                    protocol: opt_string(env, &protocol)?,
+                    resource,
                 };
                 let creation = spec.creation.take();
 
@@ -790,4 +906,55 @@ pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_NativeWebView_nati
     id: jlong,
 ) {
     let _ = send_cmd(Cmd::Close { id: id as u64 });
+}
+
+/// Completes a pending custom-protocol resource request with the bytes resolved on the Java
+/// side. A null byte array resolves as 404; otherwise the payload is served with the given
+/// MIME type.
+#[no_mangle]
+pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_NativeWebView_nativeResourceResponse<'caller>(
+    mut unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    request_id: jlong,
+    bytes: JByteArray<'caller>,
+    mime: JString<'caller>,
+) {
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<()> {
+            let payload = if bytes.is_null() {
+                None
+            } else {
+                let raw = env.convert_byte_array(&bytes)?;
+                let mime = opt_string(env, &mime)?
+                    .unwrap_or_else(|| "application/octet-stream".to_string());
+                Some((mime, raw.into_iter().map(|b| b as u8).collect::<Vec<u8>>()))
+            };
+
+            if let Some(responder) = PENDING_RESOURCES
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+                .unwrap()
+                .remove(&(request_id as u64))
+            {
+                match payload {
+                    Some((mime, body)) => {
+                        let response = Response::builder()
+                            .status(200)
+                            .header("Content-Type", mime)
+                            .body(body)
+                            .expect("valid resource response");
+                        responder.respond(response);
+                    }
+                    None => {
+                        let response = Response::builder()
+                            .status(404)
+                            .body(Vec::<u8>::new())
+                            .expect("valid 404 response");
+                        responder.respond(response);
+                    }
+                }
+            }
+            Ok(())
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
 }

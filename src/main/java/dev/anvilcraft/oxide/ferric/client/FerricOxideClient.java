@@ -84,7 +84,8 @@ public final class FerricOxideClient {
             try {
                 webUi = WebUi.embedded(
                     "FerricOxide Demo",
-                    WebUi.readModAsset(FerricOxide.MODID, "webui/demo.html"),
+                    FerricOxide.MODID,
+                    "webui/demo.html",
                     mc.getWindow().getWidth(),
                     mc.getWindow().getHeight()
                 ).on("ferric_oxide.ping", DemoWebUi::onPing).on("ferric_oxide.close", message -> close());

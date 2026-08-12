@@ -39,8 +39,23 @@ public final class NativeWebView implements AutoCloseable {
         boolean visible,
         long parent,
         @Nullable MessageHandler handler,
-        @Nullable CreationCallback creation
+        @Nullable CreationCallback creation,
+        @Nullable String protocol,
+        @Nullable ResourceHandler resource
     );
+
+    /**
+     * Completes a pending custom-protocol resource request.
+     *
+     * @param requestId the id previously passed to {@link ResourceHandler#resolve}
+     * @param bytes     the resource payload, or {@code null} to answer 404
+     * @param mime      content type for the payload, or {@code null} for the octet-stream default
+     */
+    static void respondResource(long requestId, @Nullable byte[] bytes, @Nullable String mime) {
+        nativeResourceResponse(requestId, bytes, mime);
+    }
+
+    private static native void nativeResourceResponse(long requestId, @Nullable byte[] bytes, @Nullable String mime);
 
     private static native void nativeEval(long handle, String js);
 
@@ -171,6 +186,8 @@ public final class NativeWebView implements AutoCloseable {
         private long parent;
         private @Nullable MessageHandler handler;
         private @Nullable CreationCallback creation;
+        private @Nullable String protocol;
+        private @Nullable ResourceHandler resource;
 
         public Builder title(String title) {
             this.title = title;
@@ -238,6 +255,17 @@ public final class NativeWebView implements AutoCloseable {
         }
 
         /**
+         * Registers a custom URL protocol mapping {@code {protocol}://<namespace>/<path>} to
+         * {@code namespace:path} resource locations, resolved by the given handler. Pass
+         * {@code null} for either argument to disable the protocol.
+         */
+        public Builder resource(@Nullable String protocol, @Nullable ResourceHandler resource) {
+            this.protocol = protocol;
+            this.resource = resource;
+            return this;
+        }
+
+        /**
          * Creates the native WebView. Returns immediately; the actual creation happens on the
          * dedicated event-loop thread (Windows/Linux) or the OS main queue (macOS), and its
          * outcome is reported through {@link #onCreated(CreationCallback)}.
@@ -249,7 +277,8 @@ public final class NativeWebView implements AutoCloseable {
             if (!NativeLoader.isLoaded()) {
                 throw new IllegalStateException("ferric_oxide native library is not loaded");
             }
-            long handle = nativeCreate(title, width, height, url, html, transparent, visible, parent, handler, creation);
+            long handle = nativeCreate(
+                title, width, height, url, html, transparent, visible, parent, handler, creation, protocol, resource);
             if (handle == 0L) {
                 // nativeCreate already threw a RuntimeException with details; reaching here
                 // means the JVM deferred it. Defensive:
