@@ -1,13 +1,14 @@
 package dev.anvilcraft.oxide.ferric.webui;
 
 import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Locale;
-import org.slf4j.Logger;
 
 /**
  * Loads the {@code ferric_oxide_native} JNI library.
@@ -26,9 +27,12 @@ public final class NativeLoader {
 
     private static volatile boolean loaded;
 
-    private NativeLoader() {}
+    private NativeLoader() {
+    }
 
-    /** Attempts to load the native library, ignoring failure. Must run on the client only. */
+    /**
+     * Attempts to load the native library, ignoring failure. Must run on the client only.
+     */
     public static synchronized void load() {
         if (loaded) {
             return;
@@ -47,7 +51,9 @@ public final class NativeLoader {
         }
     }
 
-    /** Whether the library has been successfully loaded. */
+    /**
+     * Whether the library has been successfully loaded.
+     */
     public static boolean isLoaded() {
         return loaded;
     }

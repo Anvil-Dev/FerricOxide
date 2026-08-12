@@ -15,36 +15,35 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
 import net.neoforged.neoforge.common.NeoForge;
 
-/** Client-side entry point: loads the native library and registers the demo WebView command. */
+import org.jspecify.annotations.Nullable;
+
+/**
+ * Client-side entry point: loads the native library and registers the demo WebView command.
+ */
 @Mod(value = FerricOxide.MODID, dist = Dist.CLIENT)
 public final class FerricOxideClient {
-    /** Set FERRICOXIDE_AUTO_OPEN=1 to open the demo UI right after game start (smoke testing). */
+    /**
+     * Set FERRICOXIDE_AUTO_OPEN=1 to open the demo UI right after game start (smoke testing).
+     */
     private static final boolean AUTO_OPEN = System.getenv("FERRICOXIDE_AUTO_OPEN") != null;
     private static boolean autoOpened;
 
     public FerricOxideClient(IEventBus modEventBus) {
         NativeLoader.load();
-        NeoForge.EVENT_BUS.addListener(
-            RegisterClientCommandsEvent.class,
-            FerricOxideClient::registerClientCommands
-        );
+        NeoForge.EVENT_BUS.addListener(RegisterClientCommandsEvent.class, FerricOxideClient::registerClientCommands);
         NeoForge.EVENT_BUS.addListener(ClientTickEvent.Post.class, FerricOxideClient::onClientTick);
     }
 
     private static void registerClientCommands(RegisterClientCommandsEvent event) {
-        event.getDispatcher().register(
-            Commands.literal("ferric")
-                .then(Commands.literal("ui")
-                    .then(Commands.literal("demo").executes(context -> {
-                        DemoWebUi.open();
-                        return 1;
-                    })))
-        );
+        event.getDispatcher()
+            .register(Commands.literal("ferric").then(Commands.literal("ui").then(Commands.literal("demo").executes(context -> {
+                DemoWebUi.open();
+                return 1;
+            }))));
     }
 
     private static void onClientTick(ClientTickEvent.Post event) {
-        if (AUTO_OPEN && !autoOpened && Minecraft.getInstance().getWindow() != null
-            && Minecraft.getInstance().getWindow().getWidth() > 0) {
+        if (AUTO_OPEN && !autoOpened && Minecraft.getInstance().getWindow() != null && Minecraft.getInstance().getWindow().getWidth() > 0) {
             autoOpened = true;
             DemoWebUi.open();
         }
@@ -53,9 +52,11 @@ public final class FerricOxideClient {
         DemoWebUi.pushGameTime();
     }
 
-    /** Shared demo state: a single WebView window showing the bundled demo page. */
+    /**
+     * Shared demo state: a single WebView window showing the bundled demo page.
+     */
     static final class DemoWebUi {
-        private static WebUi webUi;
+        private static @Nullable WebUi webUi;
         private static int lastWidth = -1;
         private static int lastHeight = -1;
         private static int gameTimeCounter;
@@ -67,7 +68,8 @@ public final class FerricOxideClient {
          */
         private static int grabRetryTicks;
 
-        private DemoWebUi() {}
+        private DemoWebUi() {
+        }
 
         static void open() {
             Minecraft mc = Minecraft.getInstance();
@@ -84,9 +86,8 @@ public final class FerricOxideClient {
                     "FerricOxide Demo",
                     WebUi.readModAsset(FerricOxide.MODID, "webui/demo.html"),
                     mc.getWindow().getWidth(),
-                    mc.getWindow().getHeight())
-                    .on("ferric_oxide.ping", DemoWebUi::onPing)
-                    .on("ferric_oxide.close", message -> close());
+                    mc.getWindow().getHeight()
+                ).on("ferric_oxide.ping", DemoWebUi::onPing).on("ferric_oxide.close", message -> close());
             } catch (Throwable t) {
                 FerricOxide.LOGGER.error("Failed to create demo webview", t);
             }
@@ -124,7 +125,9 @@ public final class FerricOxideClient {
             grabRetryTicks = 20;
         }
 
-        /** Retries the deferred mouse grab until the window regains focus (called every tick). */
+        /**
+         * Retries the deferred mouse grab until the window regains focus (called every tick).
+         */
         static void tickMouseGrab() {
             if (grabRetryTicks <= 0) {
                 return;
@@ -153,17 +156,20 @@ public final class FerricOxideClient {
             }
         }
 
-        /** Handles a JS->Java ping: shows the payload in the game chat. Runs on the render thread. */
+        /**
+         * Handles a JS->Java ping: shows the payload in the game chat. Runs on the render thread.
+         */
         private static void onPing(WebUiMessage message) {
             Minecraft mc = Minecraft.getInstance();
             if (mc.player != null) {
-                mc.gui.getChat().addClientSystemMessage(
-                    net.minecraft.network.chat.Component.literal(
-                        "WebView ping #" + message.integer("count", -1)));
+                mc.gui.getChat()
+                    .addClientSystemMessage(net.minecraft.network.chat.Component.literal("WebView ping #" + message.integer("count", -1)));
             }
         }
 
-        /** Keeps the embedded webview sized to the Minecraft window (called every client tick). */
+        /**
+         * Keeps the embedded webview sized to the Minecraft window (called every client tick).
+         */
         static void syncBounds() {
             if (webUi == null) {
                 lastWidth = -1;
@@ -180,7 +186,9 @@ public final class FerricOxideClient {
             }
         }
 
-        /** Pushes the current world time to the page once per second while the demo UI is open. */
+        /**
+         * Pushes the current world time to the page once per second while the demo UI is open.
+         */
         private static void pushGameTime() {
             if (webUi == null) {
                 return;
@@ -192,11 +200,8 @@ public final class FerricOxideClient {
             if (mc.level == null) {
                 return;
             }
-            String json = WebUiMessage.create("ferric_oxide.game_time")
-                .put("ticks", mc.level.getGameTime())
-                .toJson();
-            webUi.eval("window.ferricOxide && window.ferricOxide.onGameTime && "
-                + "window.ferricOxide.onGameTime(" + json + ");");
+            String json = WebUiMessage.create("ferric_oxide.game_time").put("ticks", mc.level.getGameTime()).toJson();
+            webUi.eval("window.ferricOxide && window.ferricOxide.onGameTime && " + "window.ferricOxide.onGameTime(" + json + ");");
         }
     }
 }

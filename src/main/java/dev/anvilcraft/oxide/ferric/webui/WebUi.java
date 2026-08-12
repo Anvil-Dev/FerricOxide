@@ -1,6 +1,11 @@
 package dev.anvilcraft.oxide.ferric.webui;
 
 import com.mojang.logging.LogUtils;
+import net.minecraft.client.Minecraft;
+import org.lwjgl.glfw.GLFWNativeCocoa;
+import org.lwjgl.glfw.GLFWNativeWin32;
+import org.slf4j.Logger;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -8,10 +13,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
-import net.minecraft.client.Minecraft;
-import org.lwjgl.glfw.GLFWNativeCocoa;
-import org.lwjgl.glfw.GLFWNativeWin32;
-import org.slf4j.Logger;
+
+import org.jspecify.annotations.Nullable;
 
 /**
  * High-level facade over a native OS WebView for mod developers.
@@ -84,7 +87,7 @@ public final class WebUi implements AutoCloseable {
                 return;
             }
             String type = message.type();
-            Consumer<WebUiMessage> handler = type == null ? null : handlers.get(type);
+            @Nullable Consumer<WebUiMessage> handler = type == null ? null : handlers.get(type);
             if (handler == null) {
                 LOGGER.debug("No handler registered for webview message type '{}'", type);
             } else {
@@ -114,58 +117,9 @@ public final class WebUi implements AutoCloseable {
         return new WebUi(webView, handlers);
     }
 
-    /** Routes inbound messages by their {@code type}. Returns {@code this}. */
-    public WebUi on(String type, Consumer<WebUiMessage> handler) {
-        handlers.put(type, handler);
-        return this;
-    }
-
-    /** Evaluates a JavaScript snippet in the page context. */
-    public void eval(String js) {
-        webView.eval(js);
-    }
-
-    /** Navigates to a URL. */
-    public void loadUrl(String url) {
-        webView.loadUrl(url);
-    }
-
-    /** Loads an HTML string. */
-    public void loadHtml(String html) {
-        webView.loadHtml(html);
-    }
-
-    /** Shows or hides the webview. */
-    public void setVisible(boolean visible) {
-        webView.setVisible(visible);
-    }
-
     /**
-     * Moves and resizes the webview. Embedded bounds use parent client-area pixels; standalone
-     * window bounds use logical pixels.
+     * Reads a UTF-8 text asset (HTML/JS/CSS) from a mod's {@code assets/<modId>} tree.
      */
-    public void setBounds(int x, int y, int width, int height) {
-        webView.setBounds(x, y, width, height);
-    }
-
-    /** Moves keyboard focus to the webview. */
-    public void focus() {
-        webView.focus();
-    }
-
-    /** Whether {@link #close()} has not been called yet. */
-    public boolean isOpen() {
-        return open;
-    }
-
-    /** Releases the wrapped webview; further calls become no-ops. */
-    @Override
-    public void close() {
-        open = false;
-        webView.close();
-    }
-
-    /** Reads a UTF-8 text asset (HTML/JS/CSS) from a mod's {@code assets/<modId>} tree. */
     public static String readModAsset(String modId, String path) {
         String resource = "/assets/" + modId + "/" + path;
         try (InputStream in = WebUi.class.getResourceAsStream(resource)) {
@@ -194,7 +148,9 @@ public final class WebUi implements AutoCloseable {
         return 0L;
     }
 
-    /** Runs the task on the render thread; executes directly when already on it. */
+    /**
+     * Runs the task on the render thread; executes directly when already on it.
+     */
     static void onRenderThread(Runnable task) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.isSameThread()) {
@@ -202,5 +158,72 @@ public final class WebUi implements AutoCloseable {
         } else {
             mc.execute(task);
         }
+    }
+
+    /**
+     * Routes inbound messages by their {@code type}. Returns {@code this}.
+     */
+    public WebUi on(String type, Consumer<WebUiMessage> handler) {
+        handlers.put(type, handler);
+        return this;
+    }
+
+    /**
+     * Evaluates a JavaScript snippet in the page context.
+     */
+    public void eval(String js) {
+        webView.eval(js);
+    }
+
+    /**
+     * Navigates to a URL.
+     */
+    public void loadUrl(String url) {
+        webView.loadUrl(url);
+    }
+
+    /**
+     * Loads an HTML string.
+     */
+    public void loadHtml(String html) {
+        webView.loadHtml(html);
+    }
+
+    /**
+     * Shows or hides the webview.
+     */
+    public void setVisible(boolean visible) {
+        webView.setVisible(visible);
+    }
+
+    /**
+     * Moves and resizes the webview. Embedded bounds use parent client-area pixels; standalone
+     * window bounds use logical pixels.
+     */
+    public void setBounds(int x, int y, int width, int height) {
+        webView.setBounds(x, y, width, height);
+    }
+
+    /**
+     * Moves keyboard focus to the webview.
+     */
+    public void focus() {
+        webView.focus();
+    }
+
+    /**
+     * Whether {@link #close()} has not been called yet.
+     */
+    public boolean isOpen() {
+        return open;
+    }
+
+    /**
+     * Releases the wrapped webview; further calls become no-ops.
+     */
+    @Override
+    public void close() {
+        open = false;
+        webView.close();
     }
 }

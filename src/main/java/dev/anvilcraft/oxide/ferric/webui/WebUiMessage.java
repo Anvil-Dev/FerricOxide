@@ -3,7 +3,10 @@ package dev.anvilcraft.oxide.ferric.webui;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+
 import java.util.Objects;
+
+import org.jspecify.annotations.Nullable;
 
 /**
  * Lightweight typed-message helpers for the {@code window.ipc.postMessage(...)} channel.
@@ -19,7 +22,9 @@ public final class WebUiMessage {
         this.json = json;
     }
 
-    /** Starts a new outbound message with the given type. */
+    /**
+     * Starts a new outbound message with the given type.
+     */
     public static WebUiMessage create(String type) {
         Objects.requireNonNull(type, "type");
         JsonObject json = new JsonObject();
@@ -27,8 +32,10 @@ public final class WebUiMessage {
         return new WebUiMessage(json);
     }
 
-    /** Parses an inbound JSON string. Returns null for malformed or non-object payloads. */
-    public static WebUiMessage parse(String json) {
+    /**
+     * Parses an inbound JSON string. Returns null for malformed or non-object payloads.
+     */
+    public static @Nullable WebUiMessage parse(String json) {
         try {
             JsonElement element = JsonParser.parseString(json);
             if (element.isJsonObject()) {
@@ -40,8 +47,10 @@ public final class WebUiMessage {
         return null;
     }
 
-    /** The {@code type} discriminator, or {@code null} when absent. */
-    public String type() {
+    /**
+     * The {@code type} discriminator, or {@code null} when absent.
+     */
+    public @Nullable String type() {
         return json.has("type") && !json.get("type").isJsonNull() ? json.get("type").getAsString() : null;
     }
 
@@ -65,7 +74,7 @@ public final class WebUiMessage {
         return this;
     }
 
-    public String string(String key) {
+    public @Nullable String string(String key) {
         return json.has(key) && !json.get(key).isJsonNull() ? json.get(key).getAsString() : null;
     }
 
@@ -95,11 +104,13 @@ public final class WebUiMessage {
 
     public boolean bool(String key, boolean fallback) {
         return json.has(key) && json.get(key).isJsonPrimitive()
-            ? json.get(key).getAsBoolean()
-            : fallback;
+               ? json.get(key).getAsBoolean()
+               : fallback;
     }
 
-    /** Serializes to the JSON string passed to {@code window.ipc.postMessage(...)}. */
+    /**
+     * Serializes to the JSON string passed to {@code window.ipc.postMessage(...)}.
+     */
     public String toJson() {
         return json.toString();
     }

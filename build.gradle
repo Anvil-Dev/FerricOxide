@@ -194,6 +194,10 @@ dependencies {
     testImplementation "org.junit.jupiter:junit-jupiter:5.11.4"
     testImplementation "com.google.code.gson:gson:2.11.0"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+
+    // JSpecify null-safety annotations, used directly by the mod sources. Already supplied
+    // transitively by NeoForge, but declared explicitly so we do not rely on transitivity.
+    compileOnly "org.jspecify:jspecify:1.0.0"
 }
 
 test {

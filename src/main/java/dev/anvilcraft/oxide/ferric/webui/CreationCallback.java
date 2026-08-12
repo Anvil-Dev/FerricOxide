@@ -1,5 +1,7 @@
 package dev.anvilcraft.oxide.ferric.webui;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Receives the asynchronous result of a {@link NativeWebView} creation.
  *
@@ -14,5 +16,5 @@ public interface CreationCallback {
      * @param id    the webview handle (matches {@link NativeWebView}'s internal id)
      * @param error a description of the failure, or {@code null} on success
      */
-    void onResult(long id, String error);
+    void onResult(long id, @Nullable String error);
 }

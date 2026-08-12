@@ -2,6 +2,8 @@ package dev.anvilcraft.oxide.ferric.webui;
 
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * A native OS WebView window (WebView2 on Windows, WebKitGTK on Linux, WKWebView on macOS).
  * Windows and Linux use a dedicated Rust event-loop thread; macOS dispatches every operation to
@@ -27,7 +29,36 @@ public final class NativeWebView implements AutoCloseable {
         return NativeLoader.isLoaded();
     }
 
-    /** Runs a JavaScript snippet in the WebView's page context. Fire-and-forget. */
+    private static native long nativeCreate(
+        String title,
+        int width,
+        int height,
+        @Nullable String url,
+        @Nullable String html,
+        boolean transparent,
+        boolean visible,
+        long parent,
+        @Nullable MessageHandler handler,
+        @Nullable CreationCallback creation
+    );
+
+    private static native void nativeEval(long handle, String js);
+
+    private static native void nativeLoadUrl(long handle, String url);
+
+    private static native void nativeLoadHtml(long handle, String html);
+
+    private static native void nativeSetVisible(long handle, boolean visible);
+
+    private static native void nativeFocus(long handle);
+
+    private static native void nativeSetBounds(long handle, int x, int y, int width, int height);
+
+    private static native void nativeClose(long handle);
+
+    /**
+     * Runs a JavaScript snippet in the WebView's page context. Fire-and-forget.
+     */
     public void eval(String js) {
         long handle = guard.handle.get();
         if (handle != 0L) {
@@ -35,7 +66,9 @@ public final class NativeWebView implements AutoCloseable {
         }
     }
 
-    /** Navigates the WebView to the given URL. */
+    /**
+     * Navigates the WebView to the given URL.
+     */
     public void loadUrl(String url) {
         long handle = guard.handle.get();
         if (handle != 0L) {
@@ -43,7 +76,9 @@ public final class NativeWebView implements AutoCloseable {
         }
     }
 
-    /** Loads the given HTML string into the WebView. */
+    /**
+     * Loads the given HTML string into the WebView.
+     */
     public void loadHtml(String html) {
         long handle = guard.handle.get();
         if (handle != 0L) {
@@ -51,7 +86,9 @@ public final class NativeWebView implements AutoCloseable {
         }
     }
 
-    /** Shows or hides the WebView window. */
+    /**
+     * Shows or hides the WebView window.
+     */
     public void setVisible(boolean visible) {
         long handle = guard.handle.get();
         if (handle != 0L) {
@@ -59,7 +96,9 @@ public final class NativeWebView implements AutoCloseable {
         }
     }
 
-    /** Moves keyboard focus to the WebView (needed for embedded webviews to receive keys). */
+    /**
+     * Moves keyboard focus to the WebView (needed for embedded webviews to receive keys).
+     */
     public void focus() {
         long handle = guard.handle.get();
         if (handle != 0L) {
@@ -87,34 +126,9 @@ public final class NativeWebView implements AutoCloseable {
         guard.close();
     }
 
-    private static native long nativeCreate(
-        String title,
-        int width,
-        int height,
-        String url,
-        String html,
-        boolean transparent,
-        boolean visible,
-        long parent,
-        MessageHandler handler,
-        CreationCallback creation
-    );
-
-    private static native void nativeEval(long handle, String js);
-
-    private static native void nativeLoadUrl(long handle, String url);
-
-    private static native void nativeLoadHtml(long handle, String html);
-
-    private static native void nativeSetVisible(long handle, boolean visible);
-
-    private static native void nativeFocus(long handle);
-
-    private static native void nativeSetBounds(long handle, int x, int y, int width, int height);
-
-    private static native void nativeClose(long handle);
-
-    /** Ensures the native window is destroyed even if the caller forgets {@link #close()}. */
+    /**
+     * Ensures the native window is destroyed even if the caller forgets {@link #close()}.
+     */
     private static final class CloseGuard implements AutoCloseable {
         private static final java.lang.ref.Cleaner CLEANER = java.lang.ref.Cleaner.create();
 
@@ -124,12 +138,14 @@ public final class NativeWebView implements AutoCloseable {
             this.handle = new AtomicLong(handle);
             // Capture only the atomic handle so the registered action does not pin the guard.
             AtomicLong handleRef = this.handle;
-            CLEANER.register(this, () -> {
-                long h = handleRef.getAndSet(0L);
-                if (h != 0L) {
-                    nativeClose(h);
+            CLEANER.register(
+                this, () -> {
+                    long h = handleRef.getAndSet(0L);
+                    if (h != 0L) {
+                        nativeClose(h);
+                    }
                 }
-            });
+            );
         }
 
         @Override
@@ -141,18 +157,20 @@ public final class NativeWebView implements AutoCloseable {
         }
     }
 
-    /** Fluent builder mirroring {@code wry::WebViewBuilder}. */
+    /**
+     * Fluent builder mirroring {@code wry::WebViewBuilder}.
+     */
     public static final class Builder {
         private String title = "FerricOxide";
         private int width = 960;
         private int height = 600;
-        private String url;
-        private String html;
+        private @Nullable String url;
+        private @Nullable String html;
         private boolean transparent;
         private boolean visible = true;
         private long parent;
-        private MessageHandler handler;
-        private CreationCallback creation;
+        private @Nullable MessageHandler handler;
+        private @Nullable CreationCallback creation;
 
         public Builder title(String title) {
             this.title = title;
@@ -165,13 +183,17 @@ public final class NativeWebView implements AutoCloseable {
             return this;
         }
 
-        /** URL to load. Wins over {@link #html(String)} when both are set. */
+        /**
+         * URL to load. Wins over {@link #html(String)} when both are set.
+         */
         public Builder url(String url) {
             this.url = url;
             return this;
         }
 
-        /** Inline HTML to load. Only used when no URL is set. */
+        /**
+         * Inline HTML to load. Only used when no URL is set.
+         */
         public Builder html(String html) {
             this.html = html;
             return this;
