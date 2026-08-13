@@ -84,6 +84,20 @@ FerricOxide 通过一个轻薄的 Rust JNI 桥接层调用操作系统原生的 
 Gradle 只复制预编译的 native 文件，不会运行 Cargo；不传该属性时，本地构建与开发运行的
 行为保持不变。
 
+## CI 版本与发布
+
+基准版本来自 `gradle.properties` 的 `mod_version`。CI 将版本作为 Gradle 覆盖参数传入，
+因此 JAR 文件名和其中的 NeoForge 元数据始终使用同一个版本：
+
+- `releases/**` 上改变构建输入的 push 会发布 **alpha** 版本到 Modrinth 和 CurseForge，版本号为
+  `<mod_version>+build.<GitHub run number>`，例如 `0.0.1+build.123`。
+- 推送 `v<mod_version>` 标签（例如 `v0.0.1`）时，工作流会先确认它与 `gradle.properties` 完全一致，
+  再发布稳定版到 Modrinth、CurseForge 和 GitHub。
+- Pull Request 仅运行八目标构建和测试，不会取得发布权限。
+
+发布需要仓库 Secrets `MODRINTH_TOKEN` 与 `CURSEFORGE_TOKEN`。任何平台拒绝上传都会让工作流
+明确失败，不会静默跳过发布。
+
 x86 动态库仅为完整性而构建和打包，但目前的 Minecraft、JDK 25 和 LWJGL 发行版通常不提供
 完整的 32 位运行时。加载 x86 native 仍需要 x86 JVM 以及架构兼容的游戏环境。打包 Linux
 动态库也不会捆绑其 WebKitGTK、GTK 或 D-Bus 系统依赖。

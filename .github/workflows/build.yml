@@ -2,6 +2,19 @@ name: Reusable Build
 
 on:
   workflow_call:
+    inputs:
+      mod_version:
+        description: Version to embed in the JAR and mod metadata. Empty uses gradle.properties.
+        required: false
+        type: string
+      ref:
+        description: Git ref to check out. Empty checks out the triggering SHA.
+        required: false
+        type: string
+    outputs:
+      mod_version:
+        description: Resolved version embedded in the packaged JAR.
+        value: ${{ jobs.package.outputs.mod_version }}
 
 permissions:
   contents: read
@@ -68,6 +81,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Install Rust target
         uses: dtolnay/rust-toolchain@stable
@@ -159,9 +174,13 @@ jobs:
     name: Package mod JAR
     needs: native
     runs-on: ubuntu-24.04
+    outputs:
+      mod_version: ${{ steps.version.outputs.value }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Download all native artifacts
         uses: actions/download-artifact@v4
@@ -169,6 +188,26 @@ jobs:
           pattern: native-*
           path: prebuilt-artifacts
           merge-multiple: true
+
+      - name: Resolve build version
+        id: version
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.mod_version }}
+        run: |
+          base_version=$(grep -E '^mod_version=' gradle.properties | cut -d= -f2-)
+          test -n "$base_version" || {
+            echo "mod_version is missing from gradle.properties" >&2
+            exit 1
+          }
+          version=${REQUESTED_VERSION:-$base_version}
+          case "$version" in
+            *[!0-9A-Za-z.+_-]*|'')
+              echo "Invalid build version: $version" >&2
+              exit 1
+              ;;
+          esac
+          echo "value=$version" >> "$GITHUB_OUTPUT"
 
       - name: Verify native artifact set
         shell: bash
@@ -219,20 +258,24 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build mod with prebuilt natives
-        run: ./gradlew build --no-daemon -PprebuiltNativesDir="$PWD/prebuilt-artifacts/natives"
+        run: >-
+          ./gradlew build --no-daemon
+          -PprebuiltNativesDir="$PWD/prebuilt-artifacts/natives"
+          -Pmod_version="${{ steps.version.outputs.value }}"
 
       - name: Locate mod JAR
         id: mod_jar
         shell: bash
+        env:
+          MOD_VERSION: ${{ steps.version.outputs.value }}
         run: |
-          mapfile -t jars < <(find build/libs -maxdepth 1 -type f -name '*.jar' \
-            ! -name '*-sources.jar' ! -name '*-javadoc.jar' | sort)
-          test "${#jars[@]}" -eq 1 || {
-            echo "Expected exactly one mod JAR, found ${#jars[@]}" >&2
-            printf '%s\n' "${jars[@]}" >&2
+          jar="build/libs/ferric_oxide-${MOD_VERSION}.jar"
+          test -f "$jar" || {
+            echo "Expected packaged mod JAR not found: $jar" >&2
+            find build/libs -maxdepth 1 -type f -name '*.jar' -print >&2
             exit 1
           }
-          echo "path=${jars[0]}" >> "$GITHUB_OUTPUT"
+          echo "path=$jar" >> "$GITHUB_OUTPUT"
 
       - name: Verify native libraries in mod JAR
         shell: bash

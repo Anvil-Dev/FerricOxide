@@ -87,6 +87,20 @@ The packaging job supplies the merged resource directory with
 `-PprebuiltNativesDir=/path/to/natives`. In this mode Gradle copies every prebuilt native and
 does not run Cargo; without the property, local and development-run behavior remains unchanged.
 
+## CI versions and publishing
+
+The baseline version is `mod_version` in `gradle.properties`. CI passes an override to Gradle, so
+the JAR filename and the embedded NeoForge metadata always carry the same version:
+
+- A push that changes build inputs on `releases/**` publishes an **alpha** to Modrinth and
+  CurseForge as `<mod_version>+build.<GitHub run number>`, for example `0.0.1+build.123`.
+- Pushing a `v<mod_version>` tag, for example `v0.0.1`, validates that it exactly matches
+  `gradle.properties`, then publishes a stable release to Modrinth, CurseForge, and GitHub.
+- Pull requests only run the eight-target build and test checks; they cannot publish.
+
+Repository secrets required for publishing are `MODRINTH_TOKEN` and `CURSEFORGE_TOKEN`. The
+workflow fails visibly if either platform rejects an upload; it never silently skips a release.
+
 The x86 libraries are built and packaged for completeness, but current Minecraft, JDK 25, and
 LWJGL distributions generally do not provide a complete 32-bit runtime. Loading an x86 native
 still requires an x86 JVM and an otherwise architecture-compatible game environment. Packaging

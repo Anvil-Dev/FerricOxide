@@ -1,8 +1,10 @@
-name: CI
+name: Snapshot CI
 
 on:
   workflow_dispatch:
   push:
+    branches:
+      - 'releases/**'
     paths:
       - 'src/**'
       - 'rust/**'
@@ -18,5 +20,70 @@ permissions:
   contents: read
 
 jobs:
+  prepare:
+    name: Resolve snapshot version
+    runs-on: ubuntu-24.04
+    outputs:
+      mod_version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create immutable snapshot version
+        id: version
+        shell: bash
+        run: |
+          base_version=$(grep -E '^mod_version=' gradle.properties | cut -d= -f2-)
+          [[ "$base_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "mod_version must use X.Y.Z format, got: $base_version" >&2
+            exit 1
+          }
+          echo "value=${base_version}+build.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare
     uses: ./.github/workflows/build.yml
+    with:
+      mod_version: ${{ needs.prepare.outputs.mod_version }}
+
+  publish:
+    name: Publish alpha to mod platforms
+    needs: [prepare, build]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download packaged mod JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: ferric-oxide-mod
+          path: release-artifact
+
+      - name: Verify release artifact
+        shell: bash
+        env:
+          MOD_VERSION: ${{ needs.prepare.outputs.mod_version }}
+        run: |
+          jar="release-artifact/ferric_oxide-${MOD_VERSION}.jar"
+          test -f "$jar" || {
+            echo "Expected snapshot artifact not found: $jar" >&2
+            find release-artifact -type f -print >&2
+            exit 1
+          }
+
+      - name: Publish alpha build
+        uses: Kir-Antipov/mc-publish@v3
+        with:
+          name: FerricOxide ${{ needs.prepare.outputs.mod_version }} for NeoForge
+          version: ${{ needs.prepare.outputs.mod_version }}
+          version-type: alpha
+          changelog: Automated snapshot build from ${{ github.sha }}.
+          loaders: neoforge
+          environment: client
+          game-versions: 26.1.2
+          java: 25
+          fail-mode: fail
+          files: release-artifact/ferric_oxide-${{ needs.prepare.outputs.mod_version }}.jar
+          modrinth-id: dPfeCBbi
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          curseforge-id: 1649164
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}

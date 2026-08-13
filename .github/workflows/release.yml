@@ -1,31 +1,110 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to release
+        required: true
+        type: string
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    uses: ./.github/workflows/build.yml
+  prepare:
+    name: Validate stable version
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      mod_version: ${{ steps.version.outputs.mod_version }}
+      commit: ${{ steps.version.outputs.commit }}
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
 
-  release:
-    name: Upload release asset
-    needs: build
+      - name: Validate tag and mod version
+        id: version
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Release tag must use vX.Y.Z format, got: $TAG" >&2
+            exit 1
+          }
+          mod_version=$(grep -E '^mod_version=' gradle.properties | cut -d= -f2-)
+          [[ "$mod_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "mod_version must use X.Y.Z format, got: $mod_version" >&2
+            exit 1
+          }
+          expected_tag="v${mod_version}"
+          test "$TAG" = "$expected_tag" || {
+            echo "Tag $TAG does not match gradle.properties mod_version $mod_version" >&2
+            exit 1
+          }
+          commit=$(git rev-list -n 1 "$TAG")
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "mod_version=$mod_version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    uses: ./.github/workflows/build.yml
+    with:
+      mod_version: ${{ needs.prepare.outputs.mod_version }}
+      ref: ${{ needs.prepare.outputs.commit }}
+
+  publish:
+    name: Publish stable release
+    needs: [prepare, build]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Download mod JAR
+      - name: Download packaged mod JAR
         uses: actions/download-artifact@v4
         with:
           name: ferric-oxide-mod
           path: release-artifact
 
-      - name: Upload mod JAR to GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Verify release artifact
+        shell: bash
+        env:
+          MOD_VERSION: ${{ needs.prepare.outputs.mod_version }}
+        run: |
+          jar="release-artifact/ferric_oxide-${MOD_VERSION}.jar"
+          test -f "$jar" || {
+            echo "Expected stable artifact not found: $jar" >&2
+            find release-artifact -type f -print >&2
+            exit 1
+          }
+
+      - name: Publish stable build
+        uses: Kir-Antipov/mc-publish@v3
         with:
-          files: release-artifact/*.jar
-          fail_on_unmatched_files: true
+          name: FerricOxide ${{ needs.prepare.outputs.mod_version }} for NeoForge
+          version: ${{ needs.prepare.outputs.mod_version }}
+          version-type: release
+          loaders: neoforge
+          environment: client
+          game-versions: 26.1.2
+          java: 25
+          fail-mode: fail
+          files: release-artifact/ferric_oxide-${{ needs.prepare.outputs.mod_version }}.jar
+          modrinth-id: dPfeCBbi
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          curseforge-id: 1649164
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+          github-tag: ${{ needs.prepare.outputs.tag }}
+          github-commitish: ${{ needs.prepare.outputs.commit }}
+          github-generate-changelog: true
+          github-draft: false
+          github-prerelease: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}

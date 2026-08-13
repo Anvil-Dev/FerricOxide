@@ -34,6 +34,11 @@ authors = "${mod_authors}" #optional
 # The description text for the mod (multi line!) (#mandatory)
 description = '''${mod_description}'''
 
+# Project identifiers consumed by Kir-Antipov/mc-publish during CI releases.
+[mc-publish]
+modrinth = "dPfeCBbi"
+curseforge = 1649164
+
 # The [[mixins]] block allows you to declare your mixin config to FML so that it gets loaded.
 [[mixins]]
 config = "${mod_id}.mixins.json"
