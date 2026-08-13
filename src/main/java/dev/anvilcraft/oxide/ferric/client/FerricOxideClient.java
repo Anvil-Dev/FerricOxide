@@ -5,10 +5,10 @@ import dev.anvilcraft.oxide.ferric.webui.EntityPreviewRenderer;
 import dev.anvilcraft.oxide.ferric.webui.NativeLoader;
 import dev.anvilcraft.oxide.ferric.webui.NativeWebView;
 import dev.anvilcraft.oxide.ferric.webui.WebUi;
-import dev.anvilcraft.oxide.ferric.webui.WebUiMessage;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
@@ -84,14 +84,17 @@ public final class FerricOxideClient {
             }
             try {
                 webUi = WebUi.embedded(
-                        "FerricOxide Demo",
-                        FerricOxide.MODID,
-                        "webui/demo.html",
-                        mc.getWindow().getWidth(),
-                        mc.getWindow().getHeight()
-                    ).on("ferric_oxide.ping", DemoWebUi::onPing)
-                    .on("ferric_oxide.entity_rotate", DemoWebUi::onEntityRotate)
-                    .on("ferric_oxide.close", message -> close());
+                    "FerricOxide Demo",
+                    FerricOxide.MODID,
+                    "webui/demo.html",
+                    mc.getWindow().getWidth(),
+                    mc.getWindow().getHeight()
+                );
+                webUi.bridge()
+                    .on("demo.ping", Ping.class, DemoWebUi::onPing)
+                    .on("demo.rotate", Rotate.class, DemoWebUi::onEntityRotate)
+                    .on("demo.close", DemoWebUi::close)
+                    .handle("demo.player", Void.class, ignored -> playerInfo());
                 WebUi.onRenderThread(() -> EntityPreviewRenderer.setPushConsumer(DemoWebUi::pushEntityFrame));
             } catch (Throwable t) {
                 FerricOxide.LOGGER.error("Failed to create demo webview", t);
@@ -99,17 +102,13 @@ public final class FerricOxideClient {
         }
 
         /**
-         * Handles JS->Java rotation updates for the entity preview (runs on the render thread).
+         * Handles JS-&gt;Java rotation updates for the entity preview. Bridge handlers already run
+         * on the render thread.
          */
-        private static void onEntityRotate(WebUiMessage message) {
-            WebUi.onRenderThread(() -> {
-                if (webUi != null && EntityPreviewRenderer.isActive()) {
-                    EntityPreviewRenderer.updateRotation(
-                        message.floatValue("yaw", 0.0F),
-                        message.floatValue("pitch", 0.0F)
-                    );
-                }
-            });
+        private static void onEntityRotate(@Nullable Rotate rotate) {
+            if (rotate != null && webUi != null && EntityPreviewRenderer.isActive()) {
+                EntityPreviewRenderer.updateRotation(rotate.yaw(), rotate.pitch());
+            }
         }
 
         /**
@@ -121,7 +120,18 @@ public final class FerricOxideClient {
                 return;
             }
             String dataUrl = "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(png);
-            webUi.eval("window.ferricOxide.onEntityPreview('" + dataUrl + "');");
+            webUi.bridge().emit("demo.entity_frame", new EntityFrame(dataUrl));
+        }
+
+        /**
+         * Answers the page's {@code demo.player} query. Runs on the render thread.
+         */
+        private static PlayerInfo playerInfo() {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player == null) {
+                throw new IllegalStateException("no player in world");
+            }
+            return new PlayerInfo(mc.player.getName().getString(), mc.player.getHealth());
         }
 
         /**
@@ -189,13 +199,13 @@ public final class FerricOxideClient {
         }
 
         /**
-         * Handles a JS->Java ping: shows the payload in the game chat. Runs on the render thread.
+         * Handles a JS-&gt;Java ping: shows the payload in the game chat. Runs on the render thread.
          */
-        private static void onPing(WebUiMessage message) {
+        private static void onPing(@Nullable Ping ping) {
             Minecraft mc = Minecraft.getInstance();
-            if (mc.player != null) {
+            if (ping != null && mc.player != null) {
                 mc.gui.getChat()
-                    .addClientSystemMessage(net.minecraft.network.chat.Component.literal("WebView ping #" + message.integer("count", -1)));
+                    .addClientSystemMessage(Component.literal("WebView ping #" + ping.count()));
             }
         }
 
@@ -232,8 +242,27 @@ public final class FerricOxideClient {
             if (mc.level == null) {
                 return;
             }
-            String json = WebUiMessage.create("ferric_oxide.game_time").put("ticks", mc.level.getGameTime()).toJson();
-            webUi.eval("window.ferricOxide && window.ferricOxide.onGameTime && " + "window.ferricOxide.onGameTime(" + json + ");");
+            webUi.bridge().emit("demo.game_time", new GameTime(mc.level.getGameTime()));
+        }
+
+        /** Ping counter sent by the demo page. */
+        record Ping(int count) {
+        }
+
+        /** Entity preview rotation in radians, sent as the pointer moves. */
+        record Rotate(float yaw, float pitch) {
+        }
+
+        /** World time pushed to the page once per second. */
+        record GameTime(long ticks) {
+        }
+
+        /** A rendered entity preview frame, carried as a PNG data URL. */
+        record EntityFrame(String dataUrl) {
+        }
+
+        /** Reply to the page's {@code demo.player} query. */
+        record PlayerInfo(String name, float health) {
         }
     }
 }

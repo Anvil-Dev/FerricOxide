@@ -96,7 +96,6 @@ final class MinecraftResourceHandler implements ResourceHandler {
 
     @Override
     public void resolve(String location, long requestId) {
-        LOGGER.debug("Webview requests resource '{}' (request {})", location, requestId);
         if (location.startsWith(ITEM_PREFIX)) {
             resolveItem(location, requestId);
             return;

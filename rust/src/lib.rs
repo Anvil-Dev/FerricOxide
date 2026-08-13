@@ -324,6 +324,9 @@ struct WebViewSpec {
     protocol: Option<String>,
     /// Java-side resolver used by the custom protocol handler.
     resource: Option<ResourceCallback>,
+    /// Script evaluated before any page script on every navigation. Used to install the
+    /// `ferric` bridge runtime so pages never have to feature-detect it.
+    init_script: Option<String>,
 }
 
 /// Commands sent from arbitrary JNI threads to the platform's native UI thread.
@@ -610,6 +613,9 @@ fn create_entry_macos(
     }
 
     let mut builder = WebViewBuilder::new().with_transparent(spec.transparent);
+    if let Some(script) = spec.init_script {
+        builder = builder.with_initialization_script(script);
+    }
     if let Some(url) = spec.url {
         builder = builder.with_url(url);
     } else if let Some(html) = spec.html {
@@ -644,6 +650,9 @@ fn create_entry(
     entries: &mut HashMap<u64, Entry>,
 ) -> Result<(), String> {
     let mut builder = WebViewBuilder::new().with_transparent(spec.transparent);
+    if let Some(script) = spec.init_script {
+        builder = builder.with_initialization_script(script);
+    }
     if let Some(url) = spec.url {
         builder = builder.with_url(url);
     } else if let Some(html) = spec.html {
@@ -736,6 +745,7 @@ pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_NativeWebView_nati
     creation: JObject<'caller>,
     protocol: JString<'caller>,
     resource: JObject<'caller>,
+    init_script: JString<'caller>,
 ) -> jlong {
     unowned_env
         .with_env(
@@ -784,6 +794,7 @@ pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_NativeWebView_nati
                     creation,
                     protocol: opt_string(env, &protocol)?,
                     resource,
+                    init_script: opt_string(env, &init_script)?,
                 };
                 let creation = spec.creation.take();
 

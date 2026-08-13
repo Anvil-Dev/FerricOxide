@@ -14,6 +14,10 @@ FerricOxide 通过一个轻薄的 Rust JNI 桥接层调用操作系统原生的 
 游戏内渲染现代化的 Web UI（HTML/CSS/JS）——不捆绑任何浏览器引擎，不内嵌 Chromium。
 它为 Minecraft 模组开发者提供了一个轻量、高性能、跨平台的图形界面基础设施。
 
+## 预览
+
+![预览](docs/img/img.png)
+
 ## 工作原理
 
 ```
@@ -38,15 +42,16 @@ FerricOxide 通过一个轻薄的 Rust JNI 桥接层调用操作系统原生的 
 - **嵌入方式**：在 Windows 上，WebView 会作为 Minecraft 窗口的 HWND 子窗口创建
   （`WebViewBuilder::build_as_child`），因此 Web UI 会贴合游戏窗口并跟随其尺寸变化。
   其他平台目前回退为独立窗口。
-- **双向通信**：页面通过 `window.ipc.postMessage(JSON.stringify(...))` 发送消息；Java
-  通过 `WebUi.on("my.type", handler)` 接收带类型的消息。Java 通过 `WebUi.eval(...)`
-  向页面推送数据。
+- **双向桥接**：事件与请求-响应在两个方向上走同一套 JSON 协议。Java 侧使用
+  `WebUi.bridge()`，页面侧使用 `ferric.emit / on / call / handle`——运行时在页面任何脚本
+  之前注入，无需判空。详见 [`docs/webui-bridge.md`](docs/webui-bridge.md)。
 
 ## 环境要求
 
 - Minecraft / NeoForge 开发环境（具体锁定版本见 `gradle.properties`）
 - JDK 25
 - Rust 工具链（`cargo`，stable）——本地构建 native 库时需要
+- Node.js 22+——`./gradlew check` 运行页面侧桥接测试时需要
 - Windows：WebView2 Runtime（Windows 11 / 新版 Edge 已预装）
 - Linux：WebKitGTK 4.1 与 D-Bus 运行时库（例如 Ubuntu 上的
   `libwebkit2gtk-4.1-0` 和 `libdbus-1-3`）
@@ -85,30 +90,49 @@ x86 动态库仅为完整性而构建和打包，但目前的 Minecraft、JDK 25
 
 ## 使用 API
 
+Java 侧——负载就是普通 record，由 Gson 转换：
+
 ```java
 import dev.anvilcraft.oxide.ferric.webui.WebUi;
-import dev.anvilcraft.oxide.ferric.webui.WebUiMessage;
+
+record Clicked(int value) {}
+record Data(int foo) {}
+record PlayerInfo(String name, float health) {}
 
 // 从模组资源加载页面，并嵌入到 Minecraft 窗口中：
 WebUi ui = WebUi.embedded(
-    "My Mod UI",
-    WebUi.readModAsset("my_mod", "webui/index.html"),
+    "My Mod UI", "my_mod", "webui/index.html",
     minecraft.getWindow().getWidth(),
     minecraft.getWindow().getHeight()
 );
 
-// 处理 JS -> Java 消息：
-ui.on("my_mod.button_clicked", msg -> {
-    int value = msg.integer("value", 0);
-    // ... 操作游戏内容（该处理器已在渲染线程上运行）
-});
+ui.bridge()
+    // JS -> Java 事件（处理器一律在渲染线程上运行）：
+    .on("my_mod.clicked", Clicked.class, clicked -> doSomething(clicked.value()))
+    // JS -> Java 请求——返回值会作为响应回传给页面：
+    .handle("my_mod.player", Void.class, ignored -> new PlayerInfo("Steve", 20.0F));
 
-// 推送 Java -> JS（页面需暴露例如 window.myMod.onData(message)）：
-ui.eval("window.myMod && window.myMod.onData && window.myMod.onData("
-    + WebUiMessage.create("my_mod.data").put("foo", 42).toJson() + ");");
+// Java -> JS 事件：
+ui.bridge().emit("my_mod.data", new Data(42));
+
+// Java -> JS 请求：
+ui.bridge().call("my_mod.form", null, FormValues.class).thenAccept(this::save);
 
 // WebUi 实现了 AutoCloseable；close() 会销毁原生窗口（GC 也会回收）。
 ui.close();
+```
+
+页面侧——完全对称，无需任何准备工作：
+
+```js
+ferric.emit('my_mod.clicked', {value: 42});
+const player = await ferric.call('my_mod.player');
+
+ferric.on('my_mod.data', (data) => render(data.foo));
+ferric.handle('my_mod.form', () => collectFormValues());
+
+// 引用游戏资源，无需关心平台的 URL 协议差异：
+img.src = ferric.resource('item/minecraft:apple', {size: 48});
 ```
 
 如需打开独立的（非嵌入）窗口，改用 `WebUi.window(...)`。更底层的原始 API
@@ -117,9 +141,10 @@ ui.close();
 
 ## 演示
 
-在游戏内运行 `/ferric ui demo` 即可打开内置的演示 UI：一个可以向游戏聊天栏发送 ping、
-并每秒接收一次 Java 推送的当前世界时间的页面。在 WebView 中按 **Esc** 可关闭它并把鼠标
-控制权交还给 Minecraft。
+在游戏内运行 `/ferric ui demo` 即可打开内置的演示 UI，它覆盖了桥接的每个方向：向游戏
+聊天栏发送 ping（JS 事件）、点击 **Who am I?** 查询玩家名与血量（JS 请求）、每秒接收一次
+世界时间以及实体预览帧（Java 事件）。在 WebView 中按 **Esc** 可关闭它并把鼠标控制权交还
+给 Minecraft。
 
 设置 `FERRICOXIDE_AUTO_OPEN=1` 可在启动后自动打开演示 UI（用于冒烟测试）。
 
@@ -134,8 +159,13 @@ src/main/java/dev/anvilcraft/oxide/ferric/
   webui/WebUi.java            公共高层 API
   webui/NativeWebView.java    底层 JNI 封装
   webui/NativeLoader.java     动态库加载（系统属性 / JAR 解压）
-  webui/WebUiMessage.java     IPC 通道的带类型消息辅助类
-src/main/resources/assets/ferric_oxide/webui/demo.html
+  webui/bridge/               双向事件/请求桥接（WebBridge + 协议实现）
+src/main/resources/assets/ferric_oxide/webui/
+  bridge.js                    页面侧桥接运行时（先于页面脚本注入）
+  demo.html                    演示页面
+src/test/java/                 Java 侧桥接的 JUnit 测试
+src/test/js/bridge.test.js     页面侧桥接的 Node 测试
+docs/webui-bridge.md           桥接协议与 API 设计
 ```
 
 ## 许可证

@@ -41,7 +41,8 @@ public final class NativeWebView implements AutoCloseable {
         @Nullable MessageHandler handler,
         @Nullable CreationCallback creation,
         @Nullable String protocol,
-        @Nullable ResourceHandler resource
+        @Nullable ResourceHandler resource,
+        @Nullable String initScript
     );
 
     /**
@@ -188,6 +189,7 @@ public final class NativeWebView implements AutoCloseable {
         private @Nullable CreationCallback creation;
         private @Nullable String protocol;
         private @Nullable ResourceHandler resource;
+        private @Nullable String initScript;
 
         public Builder title(String title) {
             this.title = title;
@@ -266,6 +268,15 @@ public final class NativeWebView implements AutoCloseable {
         }
 
         /**
+         * Registers a script evaluated before any page script on every navigation. Used to
+         * install the bridge runtime so pages can call it without feature detection.
+         */
+        public Builder initScript(String initScript) {
+            this.initScript = initScript;
+            return this;
+        }
+
+        /**
          * Creates the native WebView. Returns immediately; the actual creation happens on the
          * dedicated event-loop thread (Windows/Linux) or the OS main queue (macOS), and its
          * outcome is reported through {@link #onCreated(CreationCallback)}.
@@ -278,7 +289,8 @@ public final class NativeWebView implements AutoCloseable {
                 throw new IllegalStateException("ferric_oxide native library is not loaded");
             }
             long handle = nativeCreate(
-                title, width, height, url, html, transparent, visible, parent, handler, creation, protocol, resource);
+                title, width, height, url, html, transparent, visible, parent, handler, creation, protocol, resource,
+                initScript);
             if (handle == 0L) {
                 // nativeCreate already threw a RuntimeException with details; reaching here
                 // means the JVM deferred it. Defensive:

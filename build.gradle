@@ -193,6 +193,7 @@ dependencies {
     // Pure-Java unit tests for the public API (no Minecraft runtime needed).
     testImplementation "org.junit.jupiter:junit-jupiter:5.11.4"
     testImplementation "com.google.code.gson:gson:2.11.0"
+    testImplementation "org.slf4j:slf4j-api:2.0.16"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 
     // JSpecify null-safety annotations, used directly by the mod sources. Already supplied
@@ -202,6 +203,28 @@ dependencies {
 
 test {
     useJUnitPlatform()
+}
+
+// The page-side half of the WebUI bridge is JavaScript, so it is covered by Node's built-in test
+// runner rather than JUnit. Wired into `check` so `./gradlew build` exercises both halves.
+var testJs = tasks.register("testJs", Exec) {
+    description = "Runs the bridge runtime tests with the Node test runner."
+    group = "verification"
+    inputs.file("src/main/resources/assets/ferric_oxide/webui/bridge.js")
+    inputs.file("src/test/js/bridge.test.js")
+    // Exec always reruns without a declared output; this marker only carries up-to-date state.
+    outputs.file(layout.buildDirectory.file("test-results/testJs/passed.txt"))
+
+    var marker = layout.buildDirectory.file("test-results/testJs/passed.txt").get().asFile
+    commandLine "node", "--test", "src/test/js/bridge.test.js"
+    doLast {
+        marker.parentFile.mkdirs()
+        marker.text = "passed"
+    }
+}
+
+tasks.named("check") {
+    dependsOn testJs
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.

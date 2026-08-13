@@ -164,36 +164,50 @@
         <img alt="entity preview" id="entity">
     </div>
     <div id="entity-hint">entity:minecraft:zombie — move the mouse to rotate</div>
+    <button id="who">Who am I?</button>
+    <div id="player">--</div>
 </div>
 <script>
+    // `ferric` is installed by the bridge runtime before this script runs, so there is nothing
+    // to feature-detect and no load order to worry about.
+
+    // --- JS -> Java: one-way events -----------------------------------------
     let count = 0;
-    const btn = document.getElementById('btn');
-    btn.addEventListener('click', () => {
+    document.getElementById('btn').addEventListener('click', () => {
         count++;
         document.getElementById('count').textContent = count;
-        if (window.ipc && window.ipc.postMessage) {
-            window.ipc.postMessage(JSON.stringify({type: 'ferric_oxide.ping', count}));
-            document.getElementById('log').textContent = 'sent ping #' + count;
-        } else {
-            document.getElementById('log').textContent = 'window.ipc not available';
+        ferric.emit('demo.ping', {count});
+        document.getElementById('log').textContent = 'sent ping #' + count;
+    });
+
+    // Esc closes the UI (the key event lands in the webview, not in Minecraft).
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            ferric.emit('demo.close');
         }
     });
 
-    // Java -> JS direction: the mod pushes the world time once per second.
-    window.ferricOxide = {
-        onGameTime(message) {
-            const ticks = message && message.ticks;
-            if (typeof ticks === 'number') {
-                document.getElementById('time').textContent = 'Game time: ' + ticks + ' ticks';
-            }
-        },
-        // Rendered entity preview frames (data URL PNGs).
-        onEntityPreview(dataUrl) {
-            document.getElementById('entity').src = dataUrl;
+    // --- JS -> Java: query with a result -------------------------------------
+    document.getElementById('who').addEventListener('click', async () => {
+        const out = document.getElementById('player');
+        try {
+            const info = await ferric.call('demo.player');
+            out.textContent = info.name + ' — ' + info.health.toFixed(1) + ' HP';
+        } catch (error) {
+            out.textContent = 'query failed: ' + error.message;
         }
-    };
+    });
 
-    // Follow the pointer across the whole page, like the inventory entity preview.
+    // --- Java -> JS: events pushed by the mod --------------------------------
+    ferric.on('demo.game_time', (time) => {
+        document.getElementById('time').textContent = 'Game time: ' + time.ticks + ' ticks';
+    });
+
+    ferric.on('demo.entity_frame', (frame) => {
+        document.getElementById('entity').src = frame.dataUrl;
+    });
+
+    // --- Entity preview: follow the pointer, like the inventory preview ------
     (() => {
         const stage = document.getElementById('entity-stage');
         const hint = document.getElementById('entity-hint');
@@ -202,54 +216,26 @@
             const rect = stage.getBoundingClientRect();
             const centerX = rect.left + rect.width / 2;
             const centerY = rect.top + rect.height / 2;
-            const xAngle = Math.atan((centerX - event.clientX) / 40.0);
-            const yAngle = Math.atan((centerY - event.clientY) / 40.0);
+            const yaw = Math.atan((centerX - event.clientX) / 40.0);
+            const pitch = Math.atan((centerY - event.clientY) / 40.0);
             if (rafPending) return;
             rafPending = true;
             requestAnimationFrame(() => {
                 rafPending = false;
-                if (window.ipc && window.ipc.postMessage) {
-                    window.ipc.postMessage(JSON.stringify({
-                        type: 'ferric_oxide.entity_rotate',
-                        yaw: xAngle,
-                        pitch: yAngle
-                    }));
-                }
+                ferric.emit('demo.rotate', {yaw, pitch});
             });
         });
         // Initial frame: request the first render through the resource protocol.
-        document.getElementById('entity').src =
-            window.ferricOxideResourceBase + 'entity/minecraft:zombie?size=128';
+        document.getElementById('entity').src = ferric.resource('entity/minecraft:zombie', {size: 128});
         setTimeout(() => {
             hint.textContent = 'move the mouse over the zombie to rotate';
         }, 8000);
     })();
 
-    // Esc closes the UI through the IPC channel (the key event lands in the webview,
-    // not in Minecraft).
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && window.ipc && window.ipc.postMessage) {
-            window.ipc.postMessage(JSON.stringify({type: 'ferric_oxide.close'}));
-        }
-    });
-
-    // Demo: ping the game once after load to show the JS -> Java channel working.
-    window.addEventListener('load', () => {
-        // Absolute resource-pack reference; the injected window.ferricOxideResourceBase carries the
-        // platform-correct protocol prefix (http://ferric.localhost/ on Windows, ferric:// elsewhere).
-        document.getElementById('apple').src =
-            window.ferricOxideResourceBase + 'minecraft/textures/item/apple.png';
-        // Rendered item icon: the mod renders the ItemStack off-screen and serves the PNG.
-        document.getElementById('diamond').src =
-            window.ferricOxideResourceBase + 'item/minecraft:dragon_head?size=48';
-        setTimeout(() => {
-            count = 1;
-            document.getElementById('count').textContent = '1';
-            if (window.ipc && window.ipc.postMessage) {
-                window.ipc.postMessage(JSON.stringify({type: 'ferric_oxide.ping', count}));
-            }
-        }, 2000);
-    });
+    // --- Game resources: ferric.resource() hides the platform protocol -------
+    document.getElementById('apple').src = ferric.resource('minecraft/textures/item/apple.png');
+    // Rendered item icon: the mod renders the ItemStack off-screen and serves the PNG.
+    document.getElementById('diamond').src = ferric.resource('item/minecraft:dragon_head', {size: 48});
 </script>
 </body>
 </html>

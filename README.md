@@ -15,6 +15,10 @@ system's native WebView through a thin Rust JNI bridge — no bundled browser en
 embedded Chromium. It is a lightweight, high-performance, cross-platform GUI foundation for
 Minecraft mod developers.
 
+## Preview
+
+![Preview](docs/img/img.png)
+
 ## How it works
 
 ```
@@ -39,15 +43,17 @@ Minecraft mod developers.
 - **Embedding**: on Windows the WebView is created as an HWND child of the Minecraft window
   (`WebViewBuilder::build_as_child`), so the web UI is pinned to the game window and follows
   its size. Other platforms currently fall back to a standalone window.
-- **Two-way messaging**: pages call `window.ipc.postMessage(JSON.stringify(...))`; Java
-  receives typed messages via `WebUi.on("my.type", handler)`. Java pushes to the page with
-  `WebUi.eval(...)`.
+- **Two-way bridge**: events and queries flow in both directions over one JSON protocol.
+  Java uses `WebUi.bridge()`, the page uses `ferric.emit / on / call / handle` — the runtime
+  is injected before any page script, so no feature detection is needed. See
+  [`docs/webui-bridge.md`](docs/webui-bridge.md).
 
 ## Requirements
 
 - Minecraft / NeoForge dev environment (see `gradle.properties` for the pinned versions)
 - JDK 25
 - Rust toolchain (`cargo`, stable) — needed to build the native library locally
+- Node.js 22+ — runs the page-side bridge tests during `./gradlew check`
 - Windows: WebView2 Runtime (preinstalled on Windows 11 / modern Edge)
 - Linux: WebKitGTK 4.1 and D-Bus runtime libraries (for example,
   `libwebkit2gtk-4.1-0` and `libdbus-1-3` on Ubuntu)
@@ -88,30 +94,49 @@ the Linux libraries also does not bundle their WebKitGTK, GTK, or D-Bus system d
 
 ## Using the API
 
+Java side — payloads are plain records, converted with Gson:
+
 ```java
 import dev.anvilcraft.oxide.ferric.webui.WebUi;
-import dev.anvilcraft.oxide.ferric.webui.WebUiMessage;
+
+record Clicked(int value) {}
+record Data(int foo) {}
+record PlayerInfo(String name, float health) {}
 
 // Load your page from the mod's assets, embed it into the Minecraft window:
 WebUi ui = WebUi.embedded(
-    "My Mod UI",
-    WebUi.readModAsset("my_mod", "webui/index.html"),
+    "My Mod UI", "my_mod", "webui/index.html",
     minecraft.getWindow().getWidth(),
     minecraft.getWindow().getHeight()
 );
 
-// Handle JS -> Java messages:
-ui.on("my_mod.button_clicked", msg -> {
-    int value = msg.integer("value", 0);
-    // ... touch the game (this handler already runs on the render thread)
-});
+ui.bridge()
+    // JS -> Java event (handlers always run on the render thread):
+    .on("my_mod.clicked", Clicked.class, clicked -> doSomething(clicked.value()))
+    // JS -> Java query — whatever you return is sent back to the page:
+    .handle("my_mod.player", Void.class, ignored -> new PlayerInfo("Steve", 20.0F));
 
-// Push Java -> JS (page exposes e.g. window.myMod.onData(message)):
-ui.eval("window.myMod && window.myMod.onData && window.myMod.onData("
-    + WebUiMessage.create("my_mod.data").put("foo", 42).toJson() + ");");
+// Java -> JS event:
+ui.bridge().emit("my_mod.data", new Data(42));
+
+// Java -> JS query:
+ui.bridge().call("my_mod.form", null, FormValues.class).thenAccept(this::save);
 
 // WebUi is AutoCloseable; close() destroys the native window (also reclaimed by GC).
 ui.close();
+```
+
+Page side — the mirror image, no setup required:
+
+```js
+ferric.emit('my_mod.clicked', {value: 42});
+const player = await ferric.call('my_mod.player');
+
+ferric.on('my_mod.data', (data) => render(data.foo));
+ferric.handle('my_mod.form', () => collectFormValues());
+
+// Game resources, without worrying about the platform's URL scheme:
+img.src = ferric.resource('item/minecraft:apple', {size: 48});
 ```
 
 Open a standalone (non-embedded) window with `WebUi.window(...)` instead. The raw lower-level
@@ -120,9 +145,10 @@ API (`NativeWebView.Builder`, `MessageHandler`, `CreationCallback`) is available
 
 ## Demo
 
-Run `/ferric ui demo` in-game to open the bundled demo UI: a page that pings the game chat and
-receives the current world time pushed from Java once per second. Press **Esc** in the WebView
-to close it and return mouse control to Minecraft.
+Run `/ferric ui demo` in-game to open the bundled demo UI. It exercises every direction of the
+bridge: it pings the game chat (JS event), queries the player's name and health with
+**Who am I?** (JS query), receives the world time once per second and rendered entity frames
+(Java events). Press **Esc** in the WebView to close it and return mouse control to Minecraft.
 
 Set `FERRICOXIDE_AUTO_OPEN=1` to open the demo UI automatically after launch (used for
 smoke-testing).
@@ -138,8 +164,13 @@ src/main/java/dev/anvilcraft/oxide/ferric/
   webui/WebUi.java            Public high-level API
   webui/NativeWebView.java    Low-level JNI wrapper
   webui/NativeLoader.java     Library loading (system property / jar extraction)
-  webui/WebUiMessage.java     Typed message helpers for the IPC channel
-src/main/resources/assets/ferric_oxide/webui/demo.html
+  webui/bridge/               Two-way event/query bridge (WebBridge + protocol)
+src/main/resources/assets/ferric_oxide/webui/
+  bridge.js                    Page-side bridge runtime (injected before page scripts)
+  demo.html                    Demo page
+src/test/java/                 JUnit tests for the Java bridge half
+src/test/js/bridge.test.js     Node tests for the page-side bridge half
+docs/webui-bridge.md           Bridge protocol and API design
 ```
 
 ## License

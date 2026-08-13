@@ -208,6 +208,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # The page-side bridge runtime is covered by the Node test runner, which the `testJs`
+      # task runs as part of `check`.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 

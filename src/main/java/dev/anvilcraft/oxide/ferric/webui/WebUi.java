@@ -1,8 +1,9 @@
 package dev.anvilcraft.oxide.ferric.webui;
 
 import com.mojang.logging.LogUtils;
+import dev.anvilcraft.oxide.ferric.webui.bridge.WebBridge;
+import dev.anvilcraft.oxide.ferric.webui.bridge.WebBridgeImpl;
 import net.minecraft.client.Minecraft;
-import org.jspecify.annotations.Nullable;
 import org.lwjgl.glfw.GLFWNativeCocoa;
 import org.lwjgl.glfw.GLFWNativeWin32;
 import org.slf4j.Logger;
@@ -11,9 +12,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Consumer;
 
 /**
  * High-level facade over a native OS WebView for mod developers.
@@ -24,8 +22,10 @@ import java.util.function.Consumer;
  *       into the Minecraft window (an HWND child on Windows or an NSView child on macOS) and
  *       hands it keyboard focus and the mouse cursor; {@link #window(String, String, int, int)}
  *       opens a standalone window where supported;</li>
- *   <li>typed message routing — {@link #on(String, Consumer)} dispatches inbound
- *       {@code window.ipc.postMessage(...)} payloads by their {@code type} field;</li>
+ *   <li>a two-way {@link WebBridge} — {@link #bridge()} exchanges events and queries with the
+ *       page, which sees the same API as {@code ferric.emit / on / call / handle};</li>
+ *   <li>the {@code ferric} resource protocol, so pages can reference resource-pack files and
+ *       rendered game icons through {@code ferric.resource(...)};</li>
  *   <li>{@link #readModAsset(String, String)} to load HTML/JS/CSS from mod resources.</li>
  * </ul>
  *
@@ -35,13 +35,19 @@ import java.util.function.Consumer;
 public final class WebUi implements AutoCloseable {
     private static final Logger LOGGER = LogUtils.getLogger();
 
+    /** Custom URL protocol serving game resources to pages. */
+    private static final String RESOURCE_PROTOCOL = "ferric";
+
+    /** Bridge runtime installed into every page before its own scripts run. */
+    private static final String BRIDGE_RUNTIME = "webui/bridge.js";
+
     private final NativeWebView webView;
-    private final Map<String, Consumer<WebUiMessage>> handlers;
+    private final WebBridgeImpl bridge;
     private volatile boolean open = true;
 
-    private WebUi(NativeWebView webView, Map<String, Consumer<WebUiMessage>> handlers) {
+    private WebUi(NativeWebView webView, WebBridgeImpl bridge) {
         this.webView = webView;
-        this.handlers = handlers;
+        this.bridge = bridge;
     }
 
     /**
@@ -56,7 +62,7 @@ public final class WebUi implements AutoCloseable {
      * @param height initial height in parent client-area pixels
      */
     public static WebUi embedded(String title, String html, int width, int height) {
-        return create(true, title, html, width, height, null, null);
+        return create(true, title, html, width, height);
     }
 
     /**
@@ -66,12 +72,11 @@ public final class WebUi implements AutoCloseable {
      * <p>The page is read from {@code assets/<modId>/<path>} and a {@code <base>} element is
      * injected so that relative references resolve against the mod's {@code webui/} directory
      * (for example {@code img.png} in {@code webui/test/exp1.html} resolves to
-     * {@code webui/img.png}). Resource-pack files are addressable through the {@code ferric}
-     * protocol: {@code ferric://<namespace>/<path>} maps to the {@code namespace:path} resource
-     * location, e.g. {@code ferric://minecraft/textures/item/apple.png}.
+     * {@code webui/img.png}). Game resources are addressable from the page through
+     * {@code ferric.resource("<namespace>/<path>")}.
      *
      * @param title  window title (used for the standalone fallback)
-     * @param modId  mod id owning the page (also the default {@code ferric://} namespace)
+     * @param modId  mod id owning the page (also the default resource namespace)
      * @param path   page path inside the mod's assets, must start with {@code webui/}
      * @param width  initial width in parent client-area pixels
      * @param height initial height in parent client-area pixels
@@ -80,29 +85,37 @@ public final class WebUi implements AutoCloseable {
         if (!path.startsWith("webui/")) {
             throw new IllegalArgumentException("embedded pages must live under webui/, got: " + path);
         }
-        String html = readModAsset(modId, path);
-        // WebView2 (Windows) only intercepts http(s) URLs, so custom-scheme requests there use
-        // the `http://{protocol}.localhost/...` workaround; other platforms use the native
-        // `{protocol}://` scheme. The base element resolves relative references against the
-        // mod's webui/ directory on both forms.
-        String schemeBase = isWindows() ? "http://ferric.localhost/" : "ferric://";
-        String injected = "<base href=\"" + schemeBase + modId + "/webui/\">"
-                          + "<script>window.ferricOxideResourceBase = '" + schemeBase + "';</script>";
-        html = injectBase(html, injected);
-        return create(true, title, html, width, height, "ferric", new MinecraftResourceHandler());
+        String html = injectBase(
+            readModAsset(modId, path), "<base href=\"" + resourceBase() + modId + "/webui/\">");
+        return create(true, title, html, width, height);
     }
 
-    private static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+    /**
+     * Creates a standalone WebView window (not attached to the Minecraft window).
+     */
+    public static WebUi window(String title, String html, int width, int height) {
+        return create(false, title, html, width, height);
+    }
+
+    /**
+     * Resource URL prefix for the current platform, ending in {@code /}.
+     *
+     * <p>WebView2 (Windows) only intercepts http(s) URLs, so custom-scheme requests there use the
+     * {@code http://{protocol}.localhost/...} workaround; other platforms use the native
+     * {@code {protocol}://} scheme.
+     */
+    private static String resourceBase() {
+        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        return windows ? "http://" + RESOURCE_PROTOCOL + ".localhost/" : RESOURCE_PROTOCOL + "://";
     }
 
     /**
      * Inserts {@code <base>} right after the opening {@code <head>} tag, or at the top when absent.
      */
     private static String injectBase(String html, String base) {
-        int headEnd = indexOfIgnoreCase(html, "<head");
-        if (headEnd >= 0) {
-            int gt = html.indexOf('>', headEnd);
+        int headStart = html.toLowerCase(Locale.ROOT).indexOf("<head");
+        if (headStart >= 0) {
+            int gt = html.indexOf('>', headStart);
             if (gt >= 0) {
                 return html.substring(0, gt + 1) + base + html.substring(gt + 1);
             }
@@ -110,58 +123,34 @@ public final class WebUi implements AutoCloseable {
         return base + html;
     }
 
-    private static int indexOfIgnoreCase(String haystack, String needle) {
-        return haystack.toLowerCase(java.util.Locale.ROOT).indexOf(needle);
-    }
-
-    /**
-     * Creates a standalone WebView window (not attached to the Minecraft window).
-     */
-    public static WebUi window(String title, String html, int width, int height) {
-        return create(false, title, html, width, height, null, null);
-    }
-
-    private static WebUi create(
-        boolean embedded,
-        String title,
-        String html,
-        int width,
-        int height,
-        @Nullable String protocol,
-        @Nullable ResourceHandler resource
-    ) {
+    private static WebUi create(boolean embedded, String title, String html, int width, int height) {
         if (!NativeWebView.isAvailable()) {
             throw new IllegalStateException("ferric_oxide native library is not loaded");
         }
-        Map<String, Consumer<WebUiMessage>> handlers = new ConcurrentHashMap<>();
+        // The webview does not exist yet, but the bridge must: its inbound handler goes into the
+        // builder. The evaluator therefore resolves the webview lazily through the holder, which
+        // is filled in below before the page can run any script.
+        NativeWebView[] holder = new NativeWebView[1];
+        WebBridgeImpl bridge = new WebBridgeImpl(
+            js -> {
+                NativeWebView target = holder[0];
+                if (target == null) {
+                    LOGGER.error("Dropping bridge message sent before the webview was created: {}", js);
+                    return;
+                }
+                target.eval(js);
+            },
+            WebUi::onRenderThread
+        );
         NativeWebView.Builder builder = new NativeWebView.Builder()
             .title(title)
             .size(width, height)
-            .html(html);
+            .html(html)
+            .initScript(WebBridgeImpl.initScript(readModAsset("ferric_oxide", BRIDGE_RUNTIME), resourceBase()))
+            .resource(RESOURCE_PROTOCOL, new MinecraftResourceHandler())
+            .ipc(bridge::accept);
         if (embedded) {
             builder.parent(minecraftWindowHandle());
-        }
-        if (protocol != null && resource != null) {
-            builder.resource(protocol, resource);
-        }
-        NativeWebView[] holder = new NativeWebView[1];
-        builder.ipc(raw -> {
-            WebUiMessage message = WebUiMessage.parse(raw);
-            if (message == null) {
-                LOGGER.warn("Ignoring malformed webview message: {}", raw);
-                return;
-            }
-            String type = message.type();
-            @Nullable Consumer<WebUiMessage> handler = type == null ? null : handlers.get(type);
-            if (handler == null) {
-                LOGGER.debug("No handler registered for webview message type '{}'", type);
-            } else {
-                // IPC callbacks arrive on the platform's native UI thread. Minecraft APIs are
-                // only safe on the render thread, so marshal the dispatch before invoking handlers.
-                onRenderThread(() -> handler.accept(message));
-            }
-        });
-        if (embedded) {
             builder.onCreated((id, error) -> {
                 if (error != null && !error.isEmpty()) {
                     LOGGER.error("Failed to create embedded webview: {}", error);
@@ -179,7 +168,7 @@ public final class WebUi implements AutoCloseable {
         }
         NativeWebView webView = builder.build();
         holder[0] = webView;
-        return new WebUi(webView, handlers);
+        return new WebUi(webView, bridge);
     }
 
     /**
@@ -226,29 +215,22 @@ public final class WebUi implements AutoCloseable {
     }
 
     /**
-     * Routes inbound messages by their {@code type}. Returns {@code this}.
+     * The two-way channel to the page. Register handlers on it before the page starts talking,
+     * and use it to push events or run queries against the page.
      */
-    public WebUi on(String type, Consumer<WebUiMessage> handler) {
-        handlers.put(type, handler);
-        return this;
+    public WebBridge bridge() {
+        return bridge;
     }
 
     /**
-     * Evaluates a JavaScript snippet in the page context.
-     */
-    public void eval(String js) {
-        webView.eval(js);
-    }
-
-    /**
-     * Navigates to a URL.
+     * Navigates to a URL. The bridge runtime is reinstalled automatically on the new page.
      */
     public void loadUrl(String url) {
         webView.loadUrl(url);
     }
 
     /**
-     * Loads an HTML string.
+     * Loads an HTML string. The bridge runtime is reinstalled automatically on the new page.
      */
     public void loadHtml(String html) {
         webView.loadHtml(html);
@@ -284,11 +266,13 @@ public final class WebUi implements AutoCloseable {
     }
 
     /**
-     * Releases the wrapped webview; further calls become no-ops.
+     * Releases the wrapped webview and fails every in-flight bridge call; further calls become
+     * no-ops.
      */
     @Override
     public void close() {
         open = false;
+        bridge.close();
         webView.close();
     }
 }
