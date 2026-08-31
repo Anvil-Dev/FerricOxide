@@ -33,7 +33,6 @@ objc2-web-kit = { version = "0.3.2", features = ["WKSnapshotConfiguration"] }
 # the ones already pulled in transitively by wry.
 [target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))'.dependencies]
 webkit2gtk = "=2.0.2"
-gtk = "0.18"
 cairo-rs = "0.18"
 
 # Offscreen WebView2 (composition controller + WinRT compositor + Windows.Graphics.Capture).

@@ -438,7 +438,6 @@ dependencies = [
  "block2",
  "cairo-rs",
  "dispatch2",
- "gtk",
  "jni 0.22.4",
  "objc2",
  "objc2-app-kit",

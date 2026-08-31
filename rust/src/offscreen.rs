@@ -1088,8 +1088,7 @@ mod imp_linux {
     use tao::dpi::LogicalSize;
     use tao::event_loop::EventLoopWindowTarget;
     use tao::window::{Window, WindowBuilder};
-    use webkit2gtk::prelude::WebViewExt;
-    use webkit2gtk::{SnapshotOptions, SnapshotRegion};
+    use webkit2gtk::{SnapshotOptions, SnapshotRegion, WebViewExt};
     use wry::{BackgroundThrottlingPolicy, Rect, WebView, WebViewBuilder, WebViewExtUnix};
 
     /// Snapshot polling interval (~30 Hz).
@@ -1178,7 +1177,7 @@ mod imp_linux {
             self.webview.webview().snapshot(
                 SnapshotRegion::Visible,
                 SnapshotOptions::NONE,
-                None::<&gtk::gio::Cancellable>,
+                None::<&webkit2gtk::gio::Cancellable>,
                 move |result| {
                     pending.set(false);
                     let Ok(surface) = result else {
