@@ -109,13 +109,13 @@ jobs:
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          # Multiarch needs identical amd64/i386 versions; the runner image ships older
-          # glib dev packages than the noble-updates repo, so upgrade the amd64 side first.
-          sudo apt-get install --yes --only-upgrade \
-            libglib2.0-0t64 \
+          # libglib2.0-dev-bin(-linux) is not multiarch-coinstallable: the runner image's
+          # amd64 packages block the i386 ones. This job builds i386 only, so drop the
+          # amd64 dev packages before installing the i386 chain.
+          sudo apt-get remove --yes \
             libglib2.0-dev \
             libglib2.0-dev-bin \
-            libglib2.0-bin || true
+            libglib2.0-dev-bin-linux || true
           sudo apt-get install --yes \
             build-essential \
             gcc-multilib \
