@@ -224,8 +224,11 @@ test {
     useJUnitPlatform()
     // WebBridgeImplTest 通过相对路径读取 src/main/resources，要求工作目录为项目根
     workingDir = projectDir
-    // 离屏 WebView 冒烟测试（默认禁用，-Dferricoxide.offscreen.smoke=true 启用）
-    dependsOn packageRustNative
+    // 离屏 WebView 冒烟测试（默认禁用，-Dferricoxide.offscreen.smoke=true 启用）；
+    // 仅冒烟开启时才构建本地原生库——CI 打包任务用预编译产物，构建机上没有 webkit2gtk 开发包
+    if (System.getProperty('ferricoxide.offscreen.smoke', 'false').toBoolean()) {
+        dependsOn packageRustNative
+    }
     systemProperty 'ferricoxide.native.path', devNativePath.get()
     systemProperty 'ferricoxide.offscreen.smoke', System.getProperty('ferricoxide.offscreen.smoke', 'false')
 }
