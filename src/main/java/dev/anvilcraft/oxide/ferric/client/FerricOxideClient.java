@@ -1,6 +1,9 @@
 package dev.anvilcraft.oxide.ferric.client;
 
 import dev.anvilcraft.oxide.ferric.FerricOxide;
+import dev.anvilcraft.oxide.ferric.client.display.WebDisplayManager;
+import dev.anvilcraft.oxide.ferric.client.display.WebDisplayRenderer;
+import dev.anvilcraft.oxide.ferric.display.ModDisplay;
 import dev.anvilcraft.oxide.ferric.webui.EntityPreviewRenderer;
 import dev.anvilcraft.oxide.ferric.webui.NativeLoader;
 import dev.anvilcraft.oxide.ferric.webui.NativeWebView;
@@ -33,6 +36,13 @@ public final class FerricOxideClient {
         NativeLoader.load();
         NeoForge.EVENT_BUS.addListener(RegisterClientCommandsEvent.class, FerricOxideClient::registerClientCommands);
         NeoForge.EVENT_BUS.addListener(ClientTickEvent.Post.class, FerricOxideClient::onClientTick);
+        modEventBus.addListener(
+            net.neoforged.neoforge.client.event.EntityRenderersEvent.RegisterRenderers.class,
+            event -> event.registerBlockEntityRenderer(
+                ModDisplay.WEB_DISPLAY_BLOCK_ENTITY.get(),
+                context -> new WebDisplayRenderer()
+            )
+        );
     }
 
     private static void registerClientCommands(RegisterClientCommandsEvent event) {
@@ -51,6 +61,10 @@ public final class FerricOxideClient {
         DemoWebUi.tickMouseGrab();
         DemoWebUi.syncBounds();
         DemoWebUi.pushGameTime();
+        WebDisplayManager.tick();
+        if (Minecraft.getInstance().level == null) {
+            WebDisplayManager.clear();
+        }
     }
 
     /**

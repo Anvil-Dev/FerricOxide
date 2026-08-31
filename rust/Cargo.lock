@@ -438,6 +438,9 @@ dependencies = [
  "dispatch2",
  "jni 0.22.4",
  "tao",
+ "webview2-com",
+ "windows",
+ "windows-numerics",
  "wry",
 ]
 

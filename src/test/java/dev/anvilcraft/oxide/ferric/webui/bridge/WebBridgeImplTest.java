@@ -261,8 +261,17 @@ class WebBridgeImplTest {
     /** The shipped runtime must satisfy the exactly-once rule the loader enforces. */
     @Test
     void shippedRuntimeCarriesExactlyOnePlaceholder() throws Exception {
+        // 测试任务的工作目录可能被构建插件改写（如 ModDevGradle unitTest），
+        // 从 user.dir 向上找到项目根（含 settings.gradle）再定位资源文件。
+        java.nio.file.Path dir = java.nio.file.Path.of(System.getProperty("user.dir"));
+        while (dir != null && !java.nio.file.Files.exists(dir.resolve("settings.gradle"))) {
+            dir = dir.getParent();
+        }
+        if (dir == null) {
+            throw new IllegalStateException("cannot locate project root from " + System.getProperty("user.dir"));
+        }
         String runtime = java.nio.file.Files.readString(
-            java.nio.file.Path.of("src/main/resources/assets/ferric_oxide/webui/bridge.js"));
+            dir.resolve("src/main/resources/assets/ferric_oxide/webui/bridge.js"));
 
         String script = WebBridgeImpl.initScript(runtime, "ferric://");
 

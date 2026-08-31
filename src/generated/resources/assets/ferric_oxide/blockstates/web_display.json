@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "facing=east": {
+      "model": "ferric_oxide:block/web_display",
+      "y": 90
+    },
+    "facing=north": {
+      "model": "ferric_oxide:block/web_display"
+    },
+    "facing=south": {
+      "model": "ferric_oxide:block/web_display",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "ferric_oxide:block/web_display",
+      "y": 270
+    }
+  }
+}

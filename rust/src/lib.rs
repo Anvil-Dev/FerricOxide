@@ -34,6 +34,8 @@ use wry::http::Response;
 use wry::Rect;
 use wry::{RequestAsyncResponder, WebView, WebViewBuilder};
 
+mod offscreen;
+
 #[cfg(windows)]
 mod platform {
     use std::num::NonZeroIsize;
@@ -365,6 +367,37 @@ enum Cmd {
     Close {
         id: u64,
     },
+    OffscreenCreate {
+        id: u64,
+        spec: offscreen::OffscreenSpec,
+        creation: Option<CreationCallback>,
+    },
+    OffscreenGetFrame {
+        id: u64,
+        last_generation: u64,
+        respond: std::sync::mpsc::Sender<Option<(u64, Vec<u8>)>>,
+    },
+    OffscreenResize {
+        id: u64,
+        w: u32,
+        h: u32,
+    },
+    OffscreenCdp {
+        id: u64,
+        method: String,
+        params: String,
+    },
+    OffscreenLoadUrl {
+        id: u64,
+        url: String,
+    },
+    OffscreenEval {
+        id: u64,
+        js: String,
+    },
+    OffscreenClose {
+        id: u64,
+    },
 }
 
 /// A live WebView. Field order matters: the WebView must be dropped before its optional
@@ -461,16 +494,22 @@ fn panic_payload(payload: &(dyn Any + Send)) -> String {
 #[cfg(not(target_os = "macos"))]
 fn run(event_loop: EventLoop<Cmd>) {
     let mut entries: HashMap<u64, Entry> = HashMap::new();
+    let mut offscreen_entries: HashMap<u64, offscreen::OffscreenWebView> = HashMap::new();
     let _ = event_loop.run(move |event, elwt, control_flow| {
         *control_flow = ControlFlow::Wait;
         if let Event::UserEvent(cmd) = event {
-            handle(cmd, elwt, &mut entries);
+            handle(cmd, elwt, &mut entries, &mut offscreen_entries);
         }
     });
 }
 
 #[cfg(not(target_os = "macos"))]
-fn handle(cmd: Cmd, elwt: &EventLoopWindowTarget<Cmd>, entries: &mut HashMap<u64, Entry>) {
+fn handle(
+    cmd: Cmd,
+    elwt: &EventLoopWindowTarget<Cmd>,
+    entries: &mut HashMap<u64, Entry>,
+    offscreen_entries: &mut HashMap<u64, offscreen::OffscreenWebView>,
+) {
     match cmd {
         Cmd::Create { id, spec, creation } => {
             let result = create_entry(id, spec, elwt, entries);
@@ -536,6 +575,51 @@ fn handle(cmd: Cmd, elwt: &EventLoopWindowTarget<Cmd>, entries: &mut HashMap<u64
                 }
             }
         }
+        Cmd::OffscreenCreate { id, spec, creation } => {
+            let result = offscreen::OffscreenWebView::create(spec);
+            if let Ok(view) = result {
+                offscreen_entries.insert(id, view);
+                if let Some(callback) = creation {
+                    callback.notify(id, None);
+                }
+            } else if let Some(callback) = creation {
+                callback.notify(id, result.as_ref().err().map(String::as_str));
+            }
+        }
+        Cmd::OffscreenGetFrame {
+            id,
+            last_generation,
+            respond,
+        } => {
+            let frame = offscreen_entries
+                .get(&id)
+                .and_then(|view| view.frame(last_generation))
+                .map(|frame| (frame.generation, frame.rgba));
+            let _ = respond.send(frame);
+        }
+        Cmd::OffscreenResize { id, w, h } => {
+            if let Some(view) = offscreen_entries.get_mut(&id) {
+                view.resize(w, h);
+            }
+        }
+        Cmd::OffscreenCdp { id, method, params } => {
+            if let Some(view) = offscreen_entries.get(&id) {
+                view.cdp(&method, &params);
+            }
+        }
+        Cmd::OffscreenLoadUrl { id, url } => {
+            if let Some(view) = offscreen_entries.get(&id) {
+                view.load_url(&url);
+            }
+        }
+        Cmd::OffscreenEval { id, js } => {
+            if let Some(view) = offscreen_entries.get(&id) {
+                view.eval(&js);
+            }
+        }
+        Cmd::OffscreenClose { id } => {
+            offscreen_entries.remove(&id);
+        }
     }
 }
 
@@ -596,6 +680,21 @@ fn handle_macos(cmd: Cmd) {
         Cmd::Close { id } => MAC_ENTRIES.with(|entries| {
             entries.borrow_mut().remove(&id);
         }),
+        // Offscreen webviews are only supported on Windows; report the error through the
+        // creation callback and no-op everything else.
+        Cmd::OffscreenCreate { id, creation, .. } => {
+            if let Some(callback) = creation {
+                callback.notify(id, Some("offscreen webview is only supported on Windows"));
+            }
+        }
+        Cmd::OffscreenGetFrame { respond, .. } => {
+            let _ = respond.send(None);
+        }
+        Cmd::OffscreenResize { .. }
+        | Cmd::OffscreenCdp { .. }
+        | Cmd::OffscreenLoadUrl { .. }
+        | Cmd::OffscreenEval { .. }
+        | Cmd::OffscreenClose { .. } => {}
     }
 }
 
@@ -977,4 +1076,174 @@ pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_NativeWebView_nati
             Ok(())
         })
         .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+// ---------------------------------------------------------------------------
+// Offscreen JNI entry points (dev.anvilcraft.oxide.ferric.webui.OffscreenWebView)
+// ---------------------------------------------------------------------------
+
+/// Creates an offscreen WebView asynchronously; returns the id immediately and reports the
+/// outcome through the creation callback.
+#[no_mangle]
+pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_OffscreenWebView_nativeCreate<
+    'caller,
+>(
+    mut unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    width: jint,
+    height: jint,
+    url: JString<'caller>,
+    init_script: JString<'caller>,
+    creation: JObject<'caller>,
+) -> jlong {
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<jlong> {
+            let creation = if creation.is_null() {
+                None
+            } else {
+                Some(CreationCallback {
+                    vm: Arc::new(env.get_java_vm()?),
+                    handler: env.new_global_ref(creation)?,
+                })
+            };
+            let spec = offscreen::OffscreenSpec {
+                width: width.max(1) as u32,
+                height: height.max(1) as u32,
+                url: opt_string(env, &url)?,
+                init_script: opt_string(env, &init_script)?,
+            };
+            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            if send_cmd(Cmd::OffscreenCreate { id, spec, creation }).is_err() {
+                return fail(env, "webview command dispatcher is not running");
+            }
+            Ok(id as jlong)
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+/// Returns the newest frame as `8-byte little-endian generation || RGBA pixels`, or null when
+/// nothing newer than `last_generation` exists (or the webview is gone).
+#[no_mangle]
+pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_OffscreenWebView_nativeGetFrame<
+    'caller,
+>(
+    mut unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    id: jlong,
+    last_generation: jlong,
+) -> JByteArray<'caller> {
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<JByteArray<'caller>> {
+            let (tx, rx) = std::sync::mpsc::channel();
+            if send_cmd(Cmd::OffscreenGetFrame {
+                id: id as u64,
+                last_generation: last_generation as u64,
+                respond: tx,
+            })
+            .is_err()
+            {
+                return Ok(JByteArray::default());
+            }
+            // The event loop answers promptly; a timeout keeps a dead loop from hanging the
+            // render thread.
+            let Ok(Some((generation, rgba))) = rx.recv_timeout(std::time::Duration::from_secs(2))
+            else {
+                return Ok(JByteArray::default());
+            };
+            let mut payload = Vec::with_capacity(rgba.len() + 8);
+            payload.extend_from_slice(&generation.to_le_bytes());
+            payload.extend_from_slice(&rgba);
+            let signed: Vec<i8> = payload.into_iter().map(|b| b as i8).collect();
+            let array = env.new_byte_array(signed.len())?;
+            array.set_region(env, 0, &signed)?;
+            Ok(array)
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_OffscreenWebView_nativeResize(
+    _env: EnvUnowned<'_>,
+    _class: JClass<'_>,
+    id: jlong,
+    width: jint,
+    height: jint,
+) {
+    let _ = send_cmd(Cmd::OffscreenResize {
+        id: id as u64,
+        w: width.max(1) as u32,
+        h: height.max(1) as u32,
+    });
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_OffscreenWebView_nativeCdp<'caller>(
+    mut unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    id: jlong,
+    method: JString<'caller>,
+    params: JString<'caller>,
+) {
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<()> {
+            if let (Some(method), Some(params)) =
+                (opt_string(env, &method)?, opt_string(env, &params)?)
+            {
+                let _ = send_cmd(Cmd::OffscreenCdp {
+                    id: id as u64,
+                    method,
+                    params,
+                });
+            }
+            Ok(())
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_OffscreenWebView_nativeLoadUrl<
+    'caller,
+>(
+    mut unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    id: jlong,
+    url: JString<'caller>,
+) {
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<()> {
+            if let Some(url) = opt_string(env, &url)? {
+                let _ = send_cmd(Cmd::OffscreenLoadUrl {
+                    id: id as u64,
+                    url,
+                });
+            }
+            Ok(())
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_OffscreenWebView_nativeEval<'caller>(
+    mut unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    id: jlong,
+    js: JString<'caller>,
+) {
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<()> {
+            if let Some(js) = opt_string(env, &js)? {
+                let _ = send_cmd(Cmd::OffscreenEval { id: id as u64, js });
+            }
+            Ok(())
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_anvilcraft_oxide_ferric_webui_OffscreenWebView_nativeClose(
+    _env: EnvUnowned<'_>,
+    _class: JClass<'_>,
+    id: jlong,
+) {
+    let _ = send_cmd(Cmd::OffscreenClose { id: id as u64 });
 }

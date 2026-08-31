@@ -1,0 +1,10 @@
+{
+  "block.ferric_oxide.example_block": "Example Block",
+  "block.ferric_oxide.web_display": "Web Display",
+  "item.ferric_oxide.example_item": "Example Item",
+  "itemGroup.ferric_oxide": "Example Mod Tab",
+  "key.ferric_oxide.open_webui": "Open FerricOxide Web UI",
+  "screen.ferric_oxide.web_display.capture": "Web Display",
+  "screen.ferric_oxide.web_display.edit": "Edit Web Display URL",
+  "screen.ferric_oxide.web_display.url": "Web page URL"
+}
