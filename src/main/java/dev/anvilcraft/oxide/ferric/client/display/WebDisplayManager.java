@@ -244,7 +244,7 @@ public final class WebDisplayManager {
         }
         if (!OffscreenWebView.isAvailable()) {
             globallyUnavailable = true;
-            LOGGER.warn("Offscreen webview unavailable (Windows + WebView2 required); web display at {} stays blank",
+            LOGGER.warn("Offscreen webview unavailable (WebView2/WKWebView/WebKitGTK required); web display at {} stays blank",
                 entry.group.anchor().toShortString());
             return;
         }

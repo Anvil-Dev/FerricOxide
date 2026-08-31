@@ -9,11 +9,32 @@ crate-type = ["cdylib"]
 
 [dependencies]
 jni = "0.22"
+serde_json = "1"
 wry = { version = "0.56", features = ["devtools"] }
 tao = "0.36"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 dispatch2 = "0.3.1"
+# Offscreen WKWebView capture (takeSnapshot -> NSBitmapImageRep). Versions pinned to
+# the ones already pulled in transitively by wry; the extra features are unified with
+# wry's own feature selections.
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3.2", features = ["NSError"] }
+objc2-app-kit = { version = "0.3.2", features = [
+    "NSImage",
+    "NSBitmapImageRep",
+    "NSGraphics",
+    "NSGraphicsContext",
+] }
+objc2-web-kit = { version = "0.3.2", features = ["WKSnapshotConfiguration"] }
+
+# Offscreen WebKitGTK capture (WebView::snapshot -> cairo surface). Versions pinned to
+# the ones already pulled in transitively by wry.
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))'.dependencies]
+webkit2gtk = "=2.0.2"
+gtk = "0.18"
+cairo-rs = "0.18"
 
 # Offscreen WebView2 (composition controller + WinRT compositor + Windows.Graphics.Capture).
 # Versions are pinned to the ones already pulled in transitively by wry.

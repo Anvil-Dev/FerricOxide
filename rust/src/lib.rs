@@ -416,6 +416,9 @@ static PROXY: OnceLock<EventLoopProxy<Cmd>> = OnceLock::new();
 #[cfg(target_os = "macos")]
 thread_local! {
     static MAC_ENTRIES: RefCell<HashMap<u64, Entry>> = RefCell::new(HashMap::new());
+    /// Offscreen WKWebViews live on the main dispatch queue, same as windowed ones.
+    static MAC_OFFSCREEN_ENTRIES: RefCell<HashMap<u64, offscreen::OffscreenWebView>> =
+        RefCell::new(HashMap::new());
 }
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -576,7 +579,19 @@ fn handle(
             }
         }
         Cmd::OffscreenCreate { id, spec, creation } => {
-            let result = offscreen::OffscreenWebView::create(spec);
+            let result = offscreen::OffscreenWebView::create(
+                spec,
+                // Linux/BSD offscreen views are built on a hidden tao window and need
+                // the event loop target; Windows creates its own host window.
+                #[cfg(any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "openbsd",
+                    target_os = "netbsd"
+                ))]
+                elwt,
+            );
             if let Ok(view) = result {
                 offscreen_entries.insert(id, view);
                 if let Some(callback) = creation {
@@ -680,21 +695,62 @@ fn handle_macos(cmd: Cmd) {
         Cmd::Close { id } => MAC_ENTRIES.with(|entries| {
             entries.borrow_mut().remove(&id);
         }),
-        // Offscreen webviews are only supported on Windows; report the error through the
-        // creation callback and no-op everything else.
-        Cmd::OffscreenCreate { id, creation, .. } => {
+        Cmd::OffscreenCreate { id, spec, creation } => {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                MAC_OFFSCREEN_ENTRIES.with(|entries| {
+                    offscreen::OffscreenWebView::create(spec)
+                        .map(|view| entries.borrow_mut().insert(id, view))
+                })
+            }));
+            let error = match result {
+                Ok(Ok(_)) => None,
+                Ok(Err(message)) => Some(message),
+                Err(payload) => Some(format!(
+                    "create offscreen webview panicked: {}",
+                    panic_payload(payload.as_ref())
+                )),
+            };
             if let Some(callback) = creation {
-                callback.notify(id, Some("offscreen webview is only supported on Windows"));
+                callback.notify(id, error.as_deref());
             }
         }
-        Cmd::OffscreenGetFrame { respond, .. } => {
-            let _ = respond.send(None);
+        Cmd::OffscreenGetFrame {
+            id,
+            last_generation,
+            respond,
+        } => {
+            let frame = MAC_OFFSCREEN_ENTRIES.with(|entries| {
+                entries
+                    .borrow()
+                    .get(&id)
+                    .and_then(|view| view.frame(last_generation))
+                    .map(|frame| (frame.generation, frame.rgba))
+            });
+            let _ = respond.send(frame);
         }
-        Cmd::OffscreenResize { .. }
-        | Cmd::OffscreenCdp { .. }
-        | Cmd::OffscreenLoadUrl { .. }
-        | Cmd::OffscreenEval { .. }
-        | Cmd::OffscreenClose { .. } => {}
+        Cmd::OffscreenResize { id, w, h } => MAC_OFFSCREEN_ENTRIES.with(|entries| {
+            if let Some(view) = entries.borrow_mut().get_mut(&id) {
+                view.resize(w, h);
+            }
+        }),
+        Cmd::OffscreenCdp { id, method, params } => MAC_OFFSCREEN_ENTRIES.with(|entries| {
+            if let Some(view) = entries.borrow().get(&id) {
+                view.cdp(&method, &params);
+            }
+        }),
+        Cmd::OffscreenLoadUrl { id, url } => MAC_OFFSCREEN_ENTRIES.with(|entries| {
+            if let Some(view) = entries.borrow().get(&id) {
+                view.load_url(&url);
+            }
+        }),
+        Cmd::OffscreenEval { id, js } => MAC_OFFSCREEN_ENTRIES.with(|entries| {
+            if let Some(view) = entries.borrow().get(&id) {
+                view.eval(&js);
+            }
+        }),
+        Cmd::OffscreenClose { id } => MAC_OFFSCREEN_ENTRIES.with(|entries| {
+            entries.borrow_mut().remove(&id);
+        }),
     }
 }
 

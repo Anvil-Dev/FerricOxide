@@ -33,11 +33,15 @@ public final class OffscreenWebView implements AutoCloseable {
 
     /**
      * Indicates whether offscreen webviews can be created on this machine: the native library
-     * must be loaded and the platform must be Windows.
+     * must be loaded and the platform must be Windows (WebView2 + WGC), macOS (WKWebView
+     * snapshot) or Linux (WebKitGTK snapshot).
      */
     public static boolean isAvailable() {
-        return NativeLoader.isLoaded()
-            && System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+        if (!NativeLoader.isLoaded()) {
+            return false;
+        }
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        return os.contains("win") || os.contains("mac") || os.contains("linux");
     }
 
     private static native long nativeCreate(

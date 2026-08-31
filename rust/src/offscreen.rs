@@ -1,12 +1,13 @@
-//! Offscreen WebView2 rendering (Windows only).
+//! Offscreen webview rendering.
 //!
-//! Creates a WebView2 composition controller rooted at a WinRT composition visual that is
-//! never shown on screen, and captures that visual subtree with Windows.Graphics.Capture
-//! (WGC) into a CPU-readable RGBA frame buffer. Input is forwarded through the Chrome
-//! DevTools Protocol (`ICoreWebView2::CallDevToolsProtocolMethod`), so no window message
-//! plumbing is needed at all.
+//! - Windows: WebView2 composition controller rooted at a WinRT composition visual, captured
+//!   with Windows.Graphics.Capture into a CPU-readable RGBA buffer; input via CDP.
+//! - macOS: WKWebView (through wry) inside a hidden NSWindow, frames captured with
+//!   `WKWebView.takeSnapshot`, input forwarded by synthesizing DOM events in JavaScript.
+//! - Linux/BSD: WebKitGTK (through wry) inside a hidden tao window, frames captured with
+//!   `webkit_web_view_get_snapshot`, same JavaScript input synthesis.
 //!
-//! Reference implementation: flutter-webview-windows (MIT),
+//! Reference implementation for the Windows path: flutter-webview-windows (MIT),
 //! <https://github.com/nu-book/flutter-webview-windows> — same composition-controller +
 //! `GraphicsCaptureItem.CreateFromVisual` + free-threaded frame pool pipeline.
 
@@ -27,19 +28,47 @@ pub struct OffscreenSpec {
 #[cfg(windows)]
 pub use imp::OffscreenWebView;
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub use imp_macos::OffscreenWebView;
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+pub use imp_linux::OffscreenWebView;
+
+#[cfg(not(any(
+    windows,
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd"
+)))]
 pub use stub::OffscreenWebView;
 
-#[cfg(not(windows))]
+#[cfg(not(any(
+    windows,
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd"
+)))]
 mod stub {
     use super::{Frame, OffscreenSpec};
 
-    /// Non-Windows placeholder: creation always fails, every operation is a no-op.
+    /// Unsupported-platform placeholder: creation always fails, every operation is a no-op.
     pub struct OffscreenWebView;
 
     impl OffscreenWebView {
         pub fn create(_spec: OffscreenSpec) -> Result<Self, String> {
-            Err("offscreen webview is only supported on Windows".to_string())
+            Err("offscreen webview is not supported on this platform".to_string())
         }
 
         pub fn frame(&self, _last_generation: u64) -> Option<Frame> {
@@ -729,6 +758,487 @@ mod imp {
                 }
                 let _ = DestroyWindow(self.hwnd);
             }
+        }
+    }
+}
+
+/// Translates the CDP input calls the Java side emits into JavaScript snippets that
+/// synthesize DOM events. Used on platforms without a native input-injection API
+/// (macOS WKWebView, Linux WebKitGTK). Synthetic events are `isTrusted: false`: clicks
+/// and JS listeners work, text fields are focused explicitly on mousedown, and scrolling
+/// uses scrollBy because synthetic wheel events never scroll natively.
+#[cfg(any(
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+fn cdp_input_js(method: &str, params: &str) -> Option<String> {
+    let params: serde_json::Value = serde_json::from_str(params).ok()?;
+    match method {
+        "Input.dispatchMouseEvent" => {
+            let event_type = params.get("type")?.as_str()?;
+            let x = params.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let y = params.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let js = match event_type {
+                "mouseMoved" | "mousePressed" | "mouseReleased" => {
+                    let dom_type = match event_type {
+                        "mouseMoved" => "mousemove",
+                        "mousePressed" => "mousedown",
+                        _ => "mouseup",
+                    };
+                    let button = match params.get("button").and_then(|v| v.as_str()).unwrap_or("none") {
+                        "left" => 0,
+                        "middle" => 1,
+                        "right" => 2,
+                        _ => 0,
+                    };
+                    let buttons = if event_type == "mousePressed" { 1i32 << button } else { 0 };
+                    // 合成事件不会触发原生聚焦，手动聚焦可编辑目标以便后续 insertText
+                    let focus = if event_type == "mousePressed" {
+                        "if(el&&el.closest){const f=el.closest('input,textarea,[contenteditable=\"true\"]');if(f&&f.focus)f.focus();}"
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "(()=>{{const x={x},y={y};const el=document.elementFromPoint(x,y)||document.documentElement;el.dispatchEvent(new MouseEvent('{dom_type}',{{bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,button:{button},buttons:{buttons}}}));{focus}}})()"
+                    )
+                }
+                "mouseWheel" => {
+                    let dx = params.get("deltaX").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    let dy = params.get("deltaY").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    format!(
+                        "(()=>{{const x={x},y={y};let el=document.elementFromPoint(x,y);if(el)el.dispatchEvent(new WheelEvent('wheel',{{bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,deltaX:{dx},deltaY:{dy}}}));let t=el;while(t&&t!==document.body&&t.scrollHeight<=t.clientHeight&&t.scrollWidth<=t.clientWidth)t=t.parentElement;if(!t||t===document.body||t===document.documentElement)window.scrollBy({dx},{dy});else t.scrollBy({dx},{dy});}})()"
+                    )
+                }
+                "mouseLeft" => {
+                    "document.documentElement.dispatchEvent(new MouseEvent('mouseout',{bubbles:true,cancelable:true,view:window}))".to_string()
+                }
+                _ => return None,
+            };
+            Some(js)
+        }
+        "Input.dispatchKeyEvent" => {
+            let dom_type = match params.get("type")?.as_str()? {
+                "rawKeyDown" | "keyDown" => "keydown",
+                "keyUp" => "keyup",
+                _ => return None,
+            };
+            let key = serde_json::to_string(params.get("key").and_then(|v| v.as_str()).unwrap_or("")).ok()?;
+            let code = serde_json::to_string(params.get("code").and_then(|v| v.as_str()).unwrap_or("")).ok()?;
+            Some(format!(
+                "(()=>{{const t=document.activeElement||document.body;t.dispatchEvent(new KeyboardEvent('{dom_type}',{{key:{key},code:{code},bubbles:true,cancelable:true}}));}})()"
+            ))
+        }
+        "Input.insertText" => {
+            let text = serde_json::to_string(params.get("text").and_then(|v| v.as_str()).unwrap_or("")).ok()?;
+            Some(format!(
+                "(()=>{{const ae=document.activeElement;if(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.isContentEditable))document.execCommand('insertText',false,{text});}})()"
+            ))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod imp_macos {
+    //! Offscreen WKWebView rendering: hidden borderless NSWindow hosting a wry webview,
+    //! frames captured with `WKWebView.takeSnapshot` into an NSBitmapImageRep, input
+    //! forwarded by synthesizing DOM events in JavaScript (see `cdp_input_js`).
+    //!
+    //! Everything here runs on the process main dispatch queue (`handle_macos` in lib.rs);
+    //! the view is therefore stored in a thread_local map and never crosses threads.
+
+    use super::{cdp_input_js, Frame, OffscreenSpec};
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{
+        NSBackingStoreType, NSBitmapImageRep, NSCalibratedRGBColorSpace, NSCompositingOperation,
+        NSGraphicsContext, NSImage, NSWindow, NSWindowStyleMask,
+    };
+    use objc2_foundation::{NSError, NSInteger, NSPoint, NSRect, NSSize};
+    use objc2_web_kit::WKSnapshotConfiguration;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+    use wry::{BackgroundThrottlingPolicy, Rect, WebView, WebViewBuilder, WebViewExtMacOS};
+
+    /// Snapshot polling interval (~30 Hz).
+    const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(33);
+
+    struct Shared {
+        generation: u64,
+        data: Vec<u8>,
+    }
+
+    pub struct OffscreenWebView {
+        webview: WebView,
+        _window: Retained<NSWindow>,
+        shared: Arc<Mutex<Shared>>,
+        pending: Rc<Cell<bool>>,
+        width: u32,
+        height: u32,
+        last_request: Cell<Instant>,
+    }
+
+    impl OffscreenWebView {
+        pub fn create(spec: OffscreenSpec) -> Result<Self, String> {
+            let mtm = MainThreadMarker::new()
+                .ok_or("offscreen webview must be created on the main thread")?;
+            let rect = NSRect::new(
+                NSPoint::new(0.0, 0.0),
+                NSSize::new(spec.width as f64, spec.height as f64),
+            );
+            let window = unsafe {
+                NSWindow::initWithContentRect_styleMask_backing_defer(
+                    mtm.alloc(),
+                    rect,
+                    NSWindowStyleMask::Borderless,
+                    NSBackingStoreType::Buffered,
+                    false,
+                )
+            };
+            let content = window
+                .contentView()
+                .ok_or("hidden NSWindow has no content view")?;
+            let mut builder = WebViewBuilder::new()
+                .with_transparent(false)
+                .with_background_throttling(BackgroundThrottlingPolicy::Disabled)
+                .with_bounds(Rect {
+                    position: tao::dpi::PhysicalPosition::new(0, 0).into(),
+                    size: tao::dpi::PhysicalSize::new(spec.width, spec.height).into(),
+                });
+            if let Some(url) = spec.url {
+                builder = builder.with_url(url);
+            }
+            if let Some(script) = spec.init_script {
+                builder = builder.with_initialization_script(script);
+            }
+            let webview = builder
+                .build_as_child(&crate::platform::ParentNsView(
+                    Retained::as_ptr(&content) as *const std::ffi::c_void as isize,
+                ))
+                .map_err(|e| format!("create offscreen webview: {e}"))?;
+            Ok(Self {
+                webview,
+                _window: window,
+                shared: Arc::new(Mutex::new(Shared {
+                    generation: 0,
+                    data: Vec::new(),
+                })),
+                pending: Rc::new(Cell::new(false)),
+                width: spec.width,
+                height: spec.height,
+                last_request: Cell::new(Instant::now().checked_sub(SNAPSHOT_INTERVAL).unwrap_or_else(Instant::now)),
+            })
+        }
+
+        /// Returns a frame newer than `last_generation`, requesting a fresh snapshot first
+        /// when the polling interval elapsed. The returned frame may lag one snapshot.
+        pub fn frame(&self, last_generation: u64) -> Option<Frame> {
+            self.request_snapshot();
+            let guard = self.shared.lock().ok()?;
+            if guard.generation == last_generation || guard.data.is_empty() {
+                None
+            } else {
+                Some(Frame {
+                    generation: guard.generation,
+                    rgba: guard.data.clone(),
+                })
+            }
+        }
+
+        fn request_snapshot(&self) {
+            if self.pending.get() || self.last_request.get().elapsed() < SNAPSHOT_INTERVAL {
+                return;
+            }
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
+            self.pending.set(true);
+            self.last_request.set(Instant::now());
+            let shared = Arc::clone(&self.shared);
+            let pending = Rc::clone(&self.pending);
+            let (width, height) = (self.width, self.height);
+            let block = RcBlock::new(move |image: *mut NSImage, _error: *mut NSError| {
+                pending.set(false);
+                if image.is_null() {
+                    return;
+                }
+                let image = unsafe { &*image };
+                if let Some(rgba) = nsimage_to_rgba(image, width as usize, height as usize) {
+                    if let Ok(mut guard) = shared.lock() {
+                        guard.generation += 1;
+                        guard.data = rgba;
+                    }
+                }
+            });
+            let config: Retained<WKSnapshotConfiguration> =
+                unsafe { WKSnapshotConfiguration::init(mtm.alloc()) };
+            unsafe {
+                config.setRect(NSRect::new(
+                    NSPoint::new(0.0, 0.0),
+                    NSSize::new(width as f64, height as f64),
+                ));
+                config.setAfterScreenUpdates(false);
+            }
+            let wk = self.webview.webview();
+            unsafe { wk.takeSnapshotWithConfiguration_completionHandler(Some(&config), &block) };
+        }
+
+        pub fn resize(&mut self, width: u32, height: u32) {
+            self.width = width;
+            self.height = height;
+            let _ = self.webview.set_bounds(Rect {
+                position: tao::dpi::PhysicalPosition::new(0, 0).into(),
+                size: tao::dpi::PhysicalSize::new(width, height).into(),
+            });
+        }
+
+        pub fn cdp(&self, method: &str, params: &str) {
+            if let Some(js) = cdp_input_js(method, params) {
+                let _ = self.webview.evaluate_script(&js);
+            }
+        }
+
+        pub fn load_url(&self, url: &str) {
+            let _ = self.webview.load_url(url);
+        }
+
+        pub fn eval(&self, js: &str) {
+            let _ = self.webview.evaluate_script(js);
+        }
+    }
+
+    /// Rasterizes the snapshot image into tightly packed RGBA rows.
+    ///
+    /// NOTE: the bitmap is alpha-premultiplied by NSBitmapImageRep; with the opaque white
+    /// page background this is identical to straight RGBA. The row order depends on
+    /// NSImage's orientation handling in unflipped bitmap contexts — if frames come out
+    /// upside down, flip rows here (untested on real hardware).
+    fn nsimage_to_rgba(image: &NSImage, width: usize, height: usize) -> Option<Vec<u8>> {
+        let mtm = MainThreadMarker::new()?;
+        let rep = unsafe {
+            NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+                mtm.alloc(),
+                std::ptr::null_mut(),
+                width as NSInteger,
+                height as NSInteger,
+                8,
+                4,
+                true,
+                false,
+                NSCalibratedRGBColorSpace,
+                (width * 4) as NSInteger,
+                32,
+            )
+        }?;
+        let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
+        NSGraphicsContext::setCurrentContext(Some(&context));
+        image.drawInRect_fromRect_operation_fraction(
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width as f64, height as f64)),
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
+            NSCompositingOperation::SourceOver,
+            1.0,
+        );
+        NSGraphicsContext::setCurrentContext(None);
+        let ptr = rep.bitmapData();
+        if ptr.is_null() {
+            return None;
+        }
+        let bytes_per_row = rep.bytesPerRow() as usize;
+        let mut out = vec![0u8; width * height * 4];
+        for row in 0..height {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    ptr.add(row * bytes_per_row),
+                    out.as_mut_ptr().add(row * width * 4),
+                    width * 4,
+                );
+            }
+        }
+        Some(out)
+    }
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+mod imp_linux {
+    //! Offscreen WebKitGTK rendering: hidden tao window hosting a wry webview, frames
+    //! captured with `webkit_web_view_get_snapshot`, input forwarded by synthesizing DOM
+    //! events in JavaScript (see `cdp_input_js`).
+    //!
+    //! Everything here runs on the tao event-loop thread, which owns the GTK/glib main
+    //! context, so the asynchronous snapshot callbacks execute there as well.
+
+    use super::{cdp_input_js, Frame, OffscreenSpec};
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+    use tao::dpi::LogicalSize;
+    use tao::event_loop::EventLoopWindowTarget;
+    use tao::window::{Window, WindowBuilder};
+    use webkit2gtk::prelude::WebViewExt;
+    use webkit2gtk::{SnapshotOptions, SnapshotRegion};
+    use wry::{BackgroundThrottlingPolicy, Rect, WebView, WebViewBuilder, WebViewExtUnix};
+
+    /// Snapshot polling interval (~30 Hz).
+    const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(33);
+
+    struct Shared {
+        generation: u64,
+        data: Vec<u8>,
+    }
+
+    pub struct OffscreenWebView {
+        webview: WebView,
+        _window: Window,
+        shared: Arc<Mutex<Shared>>,
+        pending: Rc<Cell<bool>>,
+        width: u32,
+        height: u32,
+        last_request: Cell<Instant>,
+    }
+
+    impl OffscreenWebView {
+        pub fn create(
+            spec: OffscreenSpec,
+            elwt: &EventLoopWindowTarget<crate::Cmd>,
+        ) -> Result<Self, String> {
+            let window = WindowBuilder::new()
+                .with_title("ferric-oxide offscreen webview")
+                .with_visible(false)
+                .with_inner_size(LogicalSize::new(spec.width as f64, spec.height as f64))
+                .build(elwt)
+                .map_err(|e| format!("create hidden window: {e}"))?;
+            let mut builder = WebViewBuilder::new()
+                .with_transparent(false)
+                .with_background_throttling(BackgroundThrottlingPolicy::Disabled)
+                .with_bounds(Rect {
+                    position: tao::dpi::PhysicalPosition::new(0, 0).into(),
+                    size: tao::dpi::PhysicalSize::new(spec.width, spec.height).into(),
+                });
+            if let Some(url) = spec.url {
+                builder = builder.with_url(url);
+            }
+            if let Some(script) = spec.init_script {
+                builder = builder.with_initialization_script(script);
+            }
+            let webview = builder
+                .build(&window)
+                .map_err(|e| format!("create offscreen webview: {e}"))?;
+            Ok(Self {
+                webview,
+                _window: window,
+                shared: Arc::new(Mutex::new(Shared {
+                    generation: 0,
+                    data: Vec::new(),
+                })),
+                pending: Rc::new(Cell::new(false)),
+                width: spec.width,
+                height: spec.height,
+                last_request: Cell::new(Instant::now().checked_sub(SNAPSHOT_INTERVAL).unwrap_or_else(Instant::now)),
+            })
+        }
+
+        /// Returns a frame newer than `last_generation`, requesting a fresh snapshot first
+        /// when the polling interval elapsed. The returned frame may lag one snapshot.
+        pub fn frame(&self, last_generation: u64) -> Option<Frame> {
+            self.request_snapshot();
+            let guard = self.shared.lock().ok()?;
+            if guard.generation == last_generation || guard.data.is_empty() {
+                None
+            } else {
+                Some(Frame {
+                    generation: guard.generation,
+                    rgba: guard.data.clone(),
+                })
+            }
+        }
+
+        fn request_snapshot(&self) {
+            if self.pending.get() || self.last_request.get().elapsed() < SNAPSHOT_INTERVAL {
+                return;
+            }
+            self.pending.set(true);
+            self.last_request.set(Instant::now());
+            let shared = Arc::clone(&self.shared);
+            let pending = Rc::clone(&self.pending);
+            let (width, height) = (self.width as usize, self.height as usize);
+            self.webview.webview().snapshot(
+                SnapshotRegion::Visible,
+                SnapshotOptions::NONE,
+                None::<&gtk::gio::Cancellable>,
+                move |result| {
+                    pending.set(false);
+                    let Ok(surface) = result else {
+                        return;
+                    };
+                    let Ok(mut image) = cairo::ImageSurface::try_from(surface) else {
+                        return;
+                    };
+                    image.flush();
+                    let stride = image.stride() as usize;
+                    if image.width() as usize != width || image.height() as usize != height {
+                        return;
+                    }
+                    let Ok(data) = image.data() else {
+                        return;
+                    };
+                    let mut out = vec![0u8; width * height * 4];
+                    for row in 0..height {
+                        let src = &data[row * stride..row * stride + width * 4];
+                        let dst = &mut out[row * width * 4..(row + 1) * width * 4];
+                        for (s, d) in src.chunks_exact(4).zip(dst.chunks_exact_mut(4)) {
+                            // cairo ARGB32 premultiplied, little-endian memory order: B, G, R, A.
+                            // With the opaque white page background premultiplied == straight.
+                            d[0] = s[2];
+                            d[1] = s[1];
+                            d[2] = s[0];
+                            d[3] = s[3];
+                        }
+                    }
+                    if let Ok(mut guard) = shared.lock() {
+                        guard.generation += 1;
+                        guard.data = out;
+                    }
+                },
+            );
+        }
+
+        pub fn resize(&mut self, width: u32, height: u32) {
+            self.width = width;
+            self.height = height;
+            let _ = self.webview.set_bounds(Rect {
+                position: tao::dpi::PhysicalPosition::new(0, 0).into(),
+                size: tao::dpi::PhysicalSize::new(width, height).into(),
+            });
+            self._window
+                .set_inner_size(LogicalSize::new(width as f64, height as f64));
+        }
+
+        pub fn cdp(&self, method: &str, params: &str) {
+            if let Some(js) = cdp_input_js(method, params) {
+                let _ = self.webview.evaluate_script(&js);
+            }
+        }
+
+        pub fn load_url(&self, url: &str) {
+            let _ = self.webview.load_url(url);
+        }
+
+        pub fn eval(&self, js: &str) {
+            let _ = self.webview.evaluate_script(js);
         }
     }
 }
