@@ -47,12 +47,6 @@ jobs:
             arch: aarch64
             target: aarch64-pc-windows-msvc
             library: ferric_oxide_native.dll
-          - id: linux-x86
-            runner: ubuntu-24.04
-            platform: linux
-            arch: x86
-            target: i686-unknown-linux-gnu
-            library: libferric_oxide_native.so
           - id: linux-x86_64
             runner: ubuntu-24.04
             platform: linux
@@ -103,48 +97,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes build-essential pkg-config libwebkit2gtk-4.1-dev libdbus-1-dev
 
-      - name: Install Linux x86 cross dependencies
-        if: matrix.id == 'linux-x86'
-        shell: bash
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          # libglib2.0-dev-bin(-linux) is not multiarch-coinstallable: the runner image's
-          # amd64 packages block the i386 ones. This job builds i386 only, so drop the
-          # amd64 dev packages before installing the i386 chain.
-          sudo apt-get remove --yes \
-            libglib2.0-dev \
-            libglib2.0-dev-bin \
-            libglib2.0-dev-bin-linux || true
-          sudo apt-get install --yes \
-            build-essential \
-            gcc-multilib \
-            g++-multilib \
-            pkg-config \
-            libwebkit2gtk-4.1-dev:i386 \
-            libdbus-1-dev:i386
-
       - name: Build Windows native library
         if: runner.os == 'Windows'
         shell: pwsh
         run: cargo build --manifest-path rust/Cargo.toml --locked --release --target "${{ matrix.target }}"
 
-      - name: Build Linux x86 native library
-        if: matrix.id == 'linux-x86'
-        shell: bash
-        env:
-          CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER: gcc
-          CC_i686_unknown_linux_gnu: gcc
-          CFLAGS_i686_unknown_linux_gnu: -m32
-          CXX_i686_unknown_linux_gnu: g++
-          CXXFLAGS_i686_unknown_linux_gnu: -m32
-          PKG_CONFIG_ALLOW_CROSS: '1'
-          PKG_CONFIG_LIBDIR: /usr/lib/i386-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          RUSTFLAGS: -C link-arg=-m32
-        run: cargo build --manifest-path rust/Cargo.toml --locked --release --target "${{ matrix.target }}"
-
       - name: Build Unix native library
-        if: runner.os != 'Windows' && matrix.id != 'linux-x86'
+        if: runner.os != 'Windows'
         shell: bash
         run: cargo build --manifest-path rust/Cargo.toml --locked --release --target "${{ matrix.target }}"
 
@@ -223,7 +182,6 @@ jobs:
             natives/windows/x86/ferric_oxide_native.dll
             natives/windows/x86_64/ferric_oxide_native.dll
             natives/windows/aarch64/ferric_oxide_native.dll
-            natives/linux/x86/libferric_oxide_native.so
             natives/linux/x86_64/libferric_oxide_native.so
             natives/linux/aarch64/libferric_oxide_native.so
             natives/macos/x86_64/libferric_oxide_native.dylib
@@ -289,7 +247,6 @@ jobs:
         run: |
           cat > expected-natives.txt <<'EOF'
           natives/linux/aarch64/libferric_oxide_native.so
-          natives/linux/x86/libferric_oxide_native.so
           natives/linux/x86_64/libferric_oxide_native.so
           natives/macos/aarch64/libferric_oxide_native.dylib
           natives/macos/x86_64/libferric_oxide_native.dylib
@@ -300,7 +257,7 @@ jobs:
           jar tf "${{ steps.mod_jar.outputs.path }}" \
             | grep -E '^natives/.+\.(dll|so|dylib)$' \
             | sort > actual-natives.txt
-          test "$(wc -l < actual-natives.txt)" -eq 8
+          test "$(wc -l < actual-natives.txt)" -eq 7
           diff -u expected-natives.txt actual-natives.txt
 
       - name: Upload mod JAR
