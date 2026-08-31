@@ -47,6 +47,15 @@ Minecraft mod developers.
   Java uses `WebUi.bridge()`, the page uses `ferric.emit / on / call / handle` — the runtime
   is injected before any page script, so no feature detection is needed. See
   [`docs/webui-bridge.md`](docs/webui-bridge.md).
+- **In-world display**: the `web_display` block renders a website onto a block surface via
+  offscreen WebView capture, with multi-block screens and crosshair input. See
+  [`docs/web-in-world-display.md`](docs/web-in-world-display.md).
+
+### Documentation
+
+- [`docs/web-gui-architecture.md`](docs/web-gui-architecture.md) — how web pages become in-game GUIs (layering, threading, embedding, resources)
+- [`docs/webui-bridge.md`](docs/webui-bridge.md) — the two-way Java ⇄ JS bridge protocol and API
+- [`docs/web-in-world-display.md`](docs/web-in-world-display.md) — offscreen rendering and the in-world web display block
 
 ## Requirements
 
@@ -69,7 +78,7 @@ host library into the jar at `natives/<platform>/<arch>/...`, and configures dev
 `ferricoxide.native.path` system property. The `NativeLoader` first honours that property and
 otherwise extracts the matching library from the mod jar at runtime.
 
-The reusable GitHub Actions build compiles these eight native targets in parallel and packages
+The reusable GitHub Actions build compiles these seven native targets in parallel and packages
 them into one mod JAR:
 
 | Platform        | Rust target                 | JAR resource                                         |
@@ -77,7 +86,6 @@ them into one mod JAR:
 | Windows x86     | `i686-pc-windows-msvc`      | `natives/windows/x86/ferric_oxide_native.dll`        |
 | Windows x86_64  | `x86_64-pc-windows-msvc`    | `natives/windows/x86_64/ferric_oxide_native.dll`     |
 | Windows aarch64 | `aarch64-pc-windows-msvc`   | `natives/windows/aarch64/ferric_oxide_native.dll`    |
-| Linux x86       | `i686-unknown-linux-gnu`    | `natives/linux/x86/libferric_oxide_native.so`        |
 | Linux x86_64    | `x86_64-unknown-linux-gnu`  | `natives/linux/x86_64/libferric_oxide_native.so`     |
 | Linux aarch64   | `aarch64-unknown-linux-gnu` | `natives/linux/aarch64/libferric_oxide_native.so`    |
 | macOS x86_64    | `x86_64-apple-darwin`       | `natives/macos/x86_64/libferric_oxide_native.dylib`  |
@@ -96,15 +104,17 @@ the JAR filename and the embedded NeoForge metadata always carry the same versio
   CurseForge as `<mod_version>+build.<GitHub run number>`, for example `0.0.1+build.123`.
 - Pushing a `v<mod_version>` tag, for example `v0.0.1`, validates that it exactly matches
   `gradle.properties`, then publishes a stable release to Modrinth, CurseForge, and GitHub.
-- Pull requests only run the eight-target build and test checks; they cannot publish.
+- Pull requests only run the seven-target build and test checks; they cannot publish.
 
 Repository secrets required for publishing are `MODRINTH_TOKEN` and `CURSEFORGE_TOKEN`. The
 workflow fails visibly if either platform rejects an upload; it never silently skips a release.
 
 The x86 libraries are built and packaged for completeness, but current Minecraft, JDK 25, and
 LWJGL distributions generally do not provide a complete 32-bit runtime. Loading an x86 native
-still requires an x86 JVM and an otherwise architecture-compatible game environment. Packaging
-the Linux libraries also does not bundle their WebKitGTK, GTK, or D-Bus system dependencies.
+still requires an x86 JVM and an otherwise architecture-compatible game environment. The
+Linux x86 target was dropped entirely: Ubuntu 24.04 no longer provides an installable i386
+WebKitGTK development chain, and no 32-bit JDK 25 exists to run the game. Packaging the Linux
+libraries also does not bundle their WebKitGTK, GTK, or D-Bus system dependencies.
 
 ## Using the API
 
@@ -172,19 +182,27 @@ smoke-testing).
 ```
 rust/                          Native JNI bridge (wry + tao + jni)
   src/lib.rs                   JNI entry points, event-loop thread, embedded/standalone WebViews
+  src/offscreen.rs             Offscreen rendering (Windows/macOS/Linux) + CDP input translation
 src/main/java/dev/anvilcraft/oxide/ferric/
   FerricOxide.java            Mod entry point
   client/FerricOxideClient.java  Client command + demo UI wiring
   webui/WebUi.java            Public high-level API
   webui/NativeWebView.java    Low-level JNI wrapper
   webui/NativeLoader.java     Library loading (system property / jar extraction)
+  webui/OffscreenWebView.java Offscreen WebView JNI wrapper (frames + CDP input)
   webui/bridge/               Two-way event/query bridge (WebBridge + protocol)
+  display/                    Web display block, block entity, group algorithm, registration
+  client/display/             Display manager, renderer, dynamic texture, capture/edit screens
+  network/                    SetWebDisplayUrlPayload
+  data/                       Datagen (models, lang, loot tables)
 src/main/resources/assets/ferric_oxide/webui/
   bridge.js                    Page-side bridge runtime (injected before page scripts)
   demo.html                    Demo page
-src/test/java/                 JUnit tests for the Java bridge half
+src/test/java/                 JUnit tests for the Java bridge half and the group algorithm
 src/test/js/bridge.test.js     Node tests for the page-side bridge half
+docs/web-gui-architecture.md   Web-as-GUI implementation notes
 docs/webui-bridge.md           Bridge protocol and API design
+docs/web-in-world-display.md   In-world web display implementation notes
 ```
 
 ## License

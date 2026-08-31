@@ -45,6 +45,15 @@ FerricOxide 通过一个轻薄的 Rust JNI 桥接层调用操作系统原生的 
 - **双向桥接**：事件与请求-响应在两个方向上走同一套 JSON 协议。Java 侧使用
   `WebUi.bridge()`，页面侧使用 `ferric.emit / on / call / handle`——运行时在页面任何脚本
   之前注入，无需判空。详见 [`docs/webui-bridge.md`](docs/webui-bridge.md)。
+- **世界内显示**：`web_display` 方块通过离屏 WebView 抓帧把网页渲染到方块表面上，
+  支持多方块拼接大屏与准星交互。详见
+  [`docs/web-in-world-display.md`](docs/web-in-world-display.md)。
+
+### 技术文档
+
+- [`docs/web-gui-architecture.md`](docs/web-gui-architecture.md)——网页作为游戏内 GUI 的实现思路（分层、线程、嵌入、资源体系）
+- [`docs/webui-bridge.md`](docs/webui-bridge.md)——Java ⇄ JS 双向桥接协议与 API
+- [`docs/web-in-world-display.md`](docs/web-in-world-display.md)——离屏渲染与世界内网页显示器的实现思路
 
 ## 环境要求
 
@@ -67,14 +76,13 @@ FerricOxide 通过一个轻薄的 Rust JNI 桥接层调用操作系统原生的 
 `ferricoxide.native.path` 系统属性。`NativeLoader` 会优先使用该属性指定的路径，否则在
 运行时从模组 JAR 中解压匹配平台的动态库。
 
-可复用的 GitHub Actions 构建会并行编译以下八个 native 目标，并打包进同一个模组 JAR：
+可复用的 GitHub Actions 构建会并行编译以下七个 native 目标，并打包进同一个模组 JAR：
 
 | 平台            | Rust target                 | JAR 内资源路径                                       |
 |-----------------|-----------------------------|------------------------------------------------------|
 | Windows x86     | `i686-pc-windows-msvc`      | `natives/windows/x86/ferric_oxide_native.dll`        |
 | Windows x86_64  | `x86_64-pc-windows-msvc`    | `natives/windows/x86_64/ferric_oxide_native.dll`     |
 | Windows aarch64 | `aarch64-pc-windows-msvc`   | `natives/windows/aarch64/ferric_oxide_native.dll`    |
-| Linux x86       | `i686-unknown-linux-gnu`    | `natives/linux/x86/libferric_oxide_native.so`        |
 | Linux x86_64    | `x86_64-unknown-linux-gnu`  | `natives/linux/x86_64/libferric_oxide_native.so`     |
 | Linux aarch64   | `aarch64-unknown-linux-gnu` | `natives/linux/aarch64/libferric_oxide_native.so`    |
 | macOS x86_64    | `x86_64-apple-darwin`       | `natives/macos/x86_64/libferric_oxide_native.dylib`  |
@@ -93,14 +101,15 @@ Gradle 只复制预编译的 native 文件，不会运行 Cargo；不传该属�
   `<mod_version>+build.<GitHub run number>`，例如 `0.0.1+build.123`。
 - 推送 `v<mod_version>` 标签（例如 `v0.0.1`）时，工作流会先确认它与 `gradle.properties` 完全一致，
   再发布稳定版到 Modrinth、CurseForge 和 GitHub。
-- Pull Request 仅运行八目标构建和测试，不会取得发布权限。
+- Pull Request 仅运行七目标构建和测试，不会取得发布权限。
 
 发布需要仓库 Secrets `MODRINTH_TOKEN` 与 `CURSEFORGE_TOKEN`。任何平台拒绝上传都会让工作流
 明确失败，不会静默跳过发布。
 
 x86 动态库仅为完整性而构建和打包，但目前的 Minecraft、JDK 25 和 LWJGL 发行版通常不提供
-完整的 32 位运行时。加载 x86 native 仍需要 x86 JVM 以及架构兼容的游戏环境。打包 Linux
-动态库也不会捆绑其 WebKitGTK、GTK 或 D-Bus 系统依赖。
+完整的 32 位运行时。加载 x86 native 仍需要 x86 JVM 以及架构兼容的游戏环境。Linux x86
+目标已整体移除：Ubuntu 24.04 不再提供可安装的 i386 WebKitGTK 开发链，且不存在能运行
+游戏的 32 位 JDK 25。打包 Linux 动态库也不会捆绑其 WebKitGTK、GTK 或 D-Bus 系统依赖。
 
 ## 使用 API
 
@@ -167,19 +176,27 @@ img.src = ferric.resource('item/minecraft:apple', {size: 48});
 ```
 rust/                          Native JNI 桥接层（wry + tao + jni）
   src/lib.rs                   JNI 入口、事件循环线程、嵌入/独立 WebView
+  src/offscreen.rs             三平台离屏渲染 + CDP 输入翻译层
 src/main/java/dev/anvilcraft/oxide/ferric/
   FerricOxide.java            模组入口
   client/FerricOxideClient.java  客户端命令 + 演示 UI 接线
   webui/WebUi.java            公共高层 API
   webui/NativeWebView.java    底层 JNI 封装
   webui/NativeLoader.java     动态库加载（系统属性 / JAR 解压）
+  webui/OffscreenWebView.java 离屏 WebView JNI 封装（取帧 + CDP 输入）
   webui/bridge/               双向事件/请求桥接（WebBridge + 协议实现）
+  display/                    网页显示器方块、方块实体、组合算法、注册
+  client/display/             显示管理器、渲染器、动态纹理、捕获/编辑屏
+  network/                    SetWebDisplayUrlPayload 网络包
+  data/                       数据生成（模型、语言、掉落表）
 src/main/resources/assets/ferric_oxide/webui/
   bridge.js                    页面侧桥接运行时（先于页面脚本注入）
   demo.html                    演示页面
-src/test/java/                 Java 侧桥接的 JUnit 测试
+src/test/java/                 Java 侧桥接与组合算法的 JUnit 测试
 src/test/js/bridge.test.js     页面侧桥接的 Node 测试
+docs/web-gui-architecture.md   网页作为 GUI 的实现思路
 docs/webui-bridge.md           桥接协议与 API 设计
+docs/web-in-world-display.md   世界内网页显示的实现思路
 ```
 
 ## 许可证
